@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     pasarguard_base_url: AnyHttpUrl = AnyHttpUrl(
         "https://pasarguard-production-558a.up.railway.app"
     )
-    pasarguard_api_token: SecretStr | None = None
+    pasarguard_api_key: SecretStr | None = None
+    pasarguard_bearer_token: SecretStr | None = None
+    pasarguard_timeout_seconds: float = 15.0
     pasarguard_reseller_role_name: str | None = None
     pasarguard_reseller_role_id: int | None = None
 
