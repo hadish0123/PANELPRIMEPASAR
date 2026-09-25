@@ -1,22 +1,17 @@
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.types import Message
 
 from panelprimepasar.config import Settings
-
-router = Router(name="core")
-
-
-@router.message(CommandStart())
-async def start_handler(message: Message) -> None:
-    await message.answer("PANELPRIMEPASAR is online.")
+from panelprimepasar.db import SessionFactory
+from panelprimepasar.middlewares.database import DatabaseSessionMiddleware
+from panelprimepasar.routers import customer_router
 
 
 def build_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
-    dispatcher.include_router(router)
+    dispatcher.update.outer_middleware(DatabaseSessionMiddleware(SessionFactory))
+    dispatcher.include_router(customer_router)
     return dispatcher
 
 
