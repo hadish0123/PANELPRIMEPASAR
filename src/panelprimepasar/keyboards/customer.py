@@ -37,3 +37,14 @@ def plan_actions_keyboard(plan_id: UUID) -> InlineKeyboardMarkup:
     builder.button(text="↩️ پلن‌ها", callback_data="catalog")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def payment_receipt_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📎 ارسال رسید پرداخت",
+        callback_data=f"receipt:{order_id}",
+    )
+    builder.button(text="🛒 مشاهده پلن‌ها", callback_data="catalog")
+    builder.adjust(1)
+    return builder.as_markup()
