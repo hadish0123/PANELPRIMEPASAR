@@ -125,6 +125,72 @@ class ProvisioningService:
             await session.flush()
         return job
 
+    async def reissue_credentials(
+        self,
+        session: AsyncSession,
+        *,
+        order_id: UUID,
+    ) -> ProvisioningOutcome:
+        order = await session.scalar(
+            select(Order).where(Order.id == order_id).with_for_update()
+        )
+        if order is None:
+            raise ProvisioningStateError("Order not found")
+
+        customer = await session.scalar(
+            select(Customer).where(Customer.id == order.customer_id)
+        )
+        account = await session.scalar(
+            select(PasarGuardAccount).where(PasarGuardAccount.order_id == order.id)
+        )
+        if customer is None or account is None:
+            raise ProvisioningStateError("Provisioned account not found")
+
+        role = await self.client.resolve_reseller_role(
+            role_id=self.reseller_role_id,
+            role_name=self.reseller_role_name,
+        )
+        password = generate_reseller_password(username=account.username)
+
+        try:
+            admin = await self.client.ensure_admin(
+                username=account.username,
+                password=password,
+                role_id=role.id,
+                data_limit=order.quota_bytes,
+                note=f"PANELPRIMEPASAR order {order.id}",
+            )
+            if admin.id is None:
+                raise PasarGuardError(
+                    "PasarGuard credential rotation response did not include admin ID"
+                )
+        except PasarGuardError as exc:
+            return ProvisioningOutcome(
+                success=False,
+                error_code=type(exc).__name__,
+                error_message=str(exc)[:1000],
+            )
+
+        account.pasarguard_admin_id = admin.id
+        account.role_id = role.id
+        account.role_name = role.name
+        account.quota_bytes = order.quota_bytes
+        account.is_active = True
+        order.status = OrderStatus.COMPLETED
+        await session.flush()
+
+        return ProvisioningOutcome(
+            success=True,
+            already_provisioned=True,
+            credentials=ProvisionedCredentials(
+                username=account.username,
+                password=password,
+                admin_id=admin.id,
+                role_id=role.id,
+                role_name=role.name,
+            ),
+        )
+
     async def provision_paid_order(
         self,
         session: AsyncSession,
