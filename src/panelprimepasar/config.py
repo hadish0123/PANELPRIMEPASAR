@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     telegram_webhook_base_url: AnyHttpUrl | None = None
     telegram_webhook_secret: SecretStr | None = None
     telegram_owner_ids: list[int] = []
+    manual_payment_instructions: str | None = None
 
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/panelprimepasar"
     redis_url: str = "redis://localhost:6379/0"
