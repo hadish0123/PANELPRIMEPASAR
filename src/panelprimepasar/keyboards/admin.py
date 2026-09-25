@@ -11,6 +11,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     builder.button(text="➕ پلن جدید", callback_data="admin:create_plan")
     builder.button(text="📋 مدیریت پلن‌ها", callback_data="admin:plans")
     builder.button(text="🧾 سفارش‌های اخیر", callback_data="admin:orders")
+    builder.button(text="🔌 بررسی اتصال پاسارگارد", callback_data="admin:pasarguard_check")
     builder.adjust(1)
     return builder.as_markup()
 
