@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 )
 
         bot = build_bot(settings)
-        dispatcher = build_dispatcher()
+        dispatcher = build_dispatcher(settings)
         runtime = TelegramRuntime(bot=bot, dispatcher=dispatcher)
         app.state.telegram_runtime = runtime
 
