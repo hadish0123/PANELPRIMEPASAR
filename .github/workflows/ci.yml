@@ -11,17 +11,51 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: panelprimepasar
+          POSTGRES_PASSWORD: panelprimepasar
+          POSTGRES_DB: panelprimepasar
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U panelprimepasar -d panelprimepasar"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://panelprimepasar:panelprimepasar@localhost:5432/panelprimepasar
+
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: "pip"
+
       - name: Install
         run: pip install -e ".[dev]"
+
       - name: Ruff
         run: ruff check .
+
       - name: Mypy
         run: mypy
+
+      - name: Apply migrations
+        run: alembic upgrade head
+
       - name: Tests
         run: pytest --cov=panelprimepasar --cov-report=term-missing
+
+      - name: Migration round trip
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
+      - name: Docker build
+        run: docker build -t panelprimepasar:test .
