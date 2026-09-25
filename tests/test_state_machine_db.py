@@ -56,7 +56,7 @@ async def make_order(*, status: OrderStatus) -> tuple[Customer, Plan, Order]:
     return customer, plan, order
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_verified_payment_transitions_order_to_paid() -> None:
     async with SessionFactory() as session:
         customer, plan, order = await make_order(status=OrderStatus.AWAITING_PAYMENT)
@@ -126,7 +126,7 @@ class FakeProvisioningClient:
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_provisioning_is_locally_idempotent() -> None:
     client = FakeProvisioningClient()
 
@@ -163,7 +163,7 @@ async def test_provisioning_is_locally_idempotent() -> None:
         await session.rollback()
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_provisioning_failure_is_persisted_in_state_machine() -> None:
     client = FakeProvisioningClient(fail=True)
 
