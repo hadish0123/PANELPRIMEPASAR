@@ -1,0 +1,1 @@
+"""PANELPRIMEPASAR application package."""
