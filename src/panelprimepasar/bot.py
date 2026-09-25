@@ -1,16 +1,23 @@
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.fsm.storage.redis import RedisStorage
 
 from panelprimepasar.config import Settings
 from panelprimepasar.db import SessionFactory
 from panelprimepasar.middlewares.database import DatabaseSessionMiddleware
-from panelprimepasar.routers import customer_router
+from panelprimepasar.routers import admin_router, customer_router
 
 
-def build_dispatcher() -> Dispatcher:
-    dispatcher = Dispatcher()
+def build_dispatcher(settings: Settings) -> Dispatcher:
+    storage = RedisStorage.from_url(
+        settings.redis_url,
+        state_ttl=3600,
+        data_ttl=3600,
+    )
+    dispatcher = Dispatcher(storage=storage)
     dispatcher.update.outer_middleware(DatabaseSessionMiddleware(SessionFactory))
+    dispatcher.include_router(admin_router)
     dispatcher.include_router(customer_router)
     return dispatcher
 
