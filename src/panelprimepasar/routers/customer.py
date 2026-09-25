@@ -1,17 +1,25 @@
 from html import escape
 from uuid import UUID
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from panelprimepasar.config import get_settings
+from panelprimepasar.keyboards.admin import admin_order_notification_keyboard
 from panelprimepasar.keyboards.customer import (
     main_menu,
+    payment_receipt_keyboard,
     plan_actions_keyboard,
     plans_keyboard,
 )
-from panelprimepasar.models import Customer, OrderStatus
+from panelprimepasar.models import Customer, Order, OrderStatus
+from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
     get_active_plan,
@@ -20,8 +28,16 @@ from panelprimepasar.services.orders import (
     list_customer_orders,
     upsert_customer,
 )
+from panelprimepasar.services.payments import (
+    PaymentStateError,
+    create_pending_payment,
+)
 
 router = Router(name="customer")
+
+
+class ReceiptForm(StatesGroup):
+    waiting_receipt = State()
 
 
 def format_money(amount: int, currency: str) -> str:
@@ -82,6 +98,29 @@ async def send_catalog(message: Message, session: AsyncSession) -> None:
         "پلن موردنظر را انتخاب کنید:",
         reply_markup=plans_keyboard(plans),
     )
+
+
+async def _customer_order(
+    session: AsyncSession,
+    *,
+    telegram_user_id: int,
+    order_id: UUID,
+) -> tuple[Customer, Order] | None:
+    customer = await session.scalar(
+        select(Customer).where(Customer.telegram_user_id == telegram_user_id)
+    )
+    if customer is None:
+        return None
+
+    order = await session.scalar(
+        select(Order).where(
+            Order.id == order_id,
+            Order.customer_id == customer.id,
+        )
+    )
+    if order is None:
+        return None
+    return customer, order
 
 
 @router.message(CommandStart())
@@ -180,13 +219,182 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
         idempotency_key=key,
     )
 
-    await callback.answer("سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است.")
+    await callback.answer(
+        "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است."
+    )
+
+    instructions = get_settings().manual_payment_instructions
+    if instructions:
+        payment_text = escape(instructions)
+    else:
+        payment_text = (
+            "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است؛ "
+            "قبل از پرداخت با مدیریت هماهنگ کنید."
+        )
+
     await callback.message.answer(
         f"شماره سفارش: <code>{order.id}</code>\n"
         f"مبلغ: <b>{format_money(order.price_amount, order.currency)}</b>\n"
         "وضعیت: <b>در انتظار پرداخت</b>\n\n"
-        "مرحله بعدی، اتصال روش پرداخت به همین سفارش است."
+        f"{payment_text}\n\n"
+        "پس از پرداخت، تصویر یا فایل رسید را ارسال کنید.",
+        reply_markup=payment_receipt_keyboard(order.id),
     )
+
+
+@router.callback_query(F.data.startswith("receipt:"))
+async def receipt_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    data = callback.data or ""
+    try:
+        order_id = UUID(data.removeprefix("receipt:"))
+    except ValueError:
+        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        return
+
+    order_customer = await _customer_order(
+        session,
+        telegram_user_id=callback.from_user.id,
+        order_id=order_id,
+    )
+    if order_customer is None:
+        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        return
+
+    _, order = order_customer
+    if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
+        await callback.answer(
+            f"وضعیت سفارش: {order_status_label(order.status)}",
+            show_alert=True,
+        )
+        return
+
+    await state.clear()
+    await state.update_data(order_id=str(order.id))
+    await state.set_state(ReceiptForm.waiting_receipt)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            "تصویر رسید یا فایل رسید پرداخت را همین‌جا ارسال کنید."
+        )
+
+
+@router.message(ReceiptForm.waiting_receipt, F.photo | F.document)
+async def receipt_received(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
+    user = message.from_user
+    if user is None:
+        return
+
+    data = await state.get_data()
+    try:
+        order_id = UUID(str(data["order_id"]))
+    except (KeyError, ValueError):
+        await state.clear()
+        await message.answer("اطلاعات سفارش معتبر نیست؛ دوباره از سفارش وارد ارسال رسید شوید.")
+        return
+
+    order_customer = await _customer_order(
+        session,
+        telegram_user_id=user.id,
+        order_id=order_id,
+    )
+    if order_customer is None:
+        await state.clear()
+        await message.answer("سفارش پیدا نشد.")
+        return
+
+    customer, order = order_customer
+    if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
+        await state.clear()
+        await message.answer(
+            f"این سفارش اکنون «{order_status_label(order.status)}» است."
+        )
+        return
+
+    if message.photo:
+        receipt_kind = "photo"
+        file_id = message.photo[-1].file_id
+    elif message.document is not None:
+        receipt_kind = "document"
+        file_id = message.document.file_id
+    else:
+        await message.answer("تصویر یا فایل رسید ارسال کنید.")
+        return
+
+    try:
+        payment = await create_pending_payment(
+            session,
+            order_id=order.id,
+            provider="manual",
+            raw_reference=f"telegram:{receipt_kind}:{file_id}",
+        )
+    except PaymentStateError as exc:
+        await session.rollback()
+        await state.clear()
+        await message.answer(f"ثبت رسید ناموفق بود: {escape(str(exc))}")
+        return
+
+    await record_audit_event(
+        session,
+        actor_type="customer",
+        actor_id=str(user.id),
+        action="payment.receipt_submitted",
+        entity_type="order",
+        entity_id=str(order.id),
+        correlation_id=str(order.id),
+        metadata={
+            "payment_id": str(payment.id),
+            "receipt_kind": receipt_kind,
+        },
+    )
+    await session.commit()
+    await state.clear()
+
+    settings = get_settings()
+    caption = (
+        "<b>رسید پرداخت جدید</b>\n"
+        f"سفارش: <code>{order.id}</code>\n"
+        f"مشتری: <code>{customer.telegram_user_id}</code>\n"
+        f"مبلغ: <b>{format_money(order.price_amount, order.currency)}</b>"
+    )
+    keyboard = admin_order_notification_keyboard(order.id)
+
+    for owner_id in settings.telegram_owner_ids:
+        try:
+            if receipt_kind == "photo":
+                await bot.send_photo(
+                    owner_id,
+                    file_id,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+            else:
+                await bot.send_document(
+                    owner_id,
+                    file_id,
+                    caption=caption,
+                    reply_markup=keyboard,
+                )
+        except TelegramAPIError:
+            continue
+
+    await message.answer(
+        "رسید ثبت شد و برای بررسی مدیریت ارسال شد. "
+        "پس از تأیید، وضعیت سفارش به‌روزرسانی می‌شود."
+    )
+
+
+@router.message(ReceiptForm.waiting_receipt)
+async def receipt_invalid_message(message: Message) -> None:
+    await message.answer("لطفاً تصویر یا فایل رسید پرداخت را ارسال کنید.")
 
 
 @router.message(F.text == "📦 سفارش‌های من")
