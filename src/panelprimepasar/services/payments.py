@@ -130,3 +130,58 @@ async def fail_payment(
     payment.status = PaymentStatus.FAILED
     await session.flush()
     return payment
+
+
+async def approve_manual_order(
+    session: AsyncSession,
+    *,
+    order_id: UUID,
+    actor_telegram_id: int,
+) -> Payment:
+    order = await session.scalar(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    if order is None:
+        raise PaymentStateError("Order not found")
+
+    if order.status in {
+        OrderStatus.PAID,
+        OrderStatus.PROVISIONING,
+        OrderStatus.COMPLETED,
+        OrderStatus.FAILED,
+    }:
+        verified = await session.scalar(
+            select(Payment)
+            .where(
+                Payment.order_id == order.id,
+                Payment.status == PaymentStatus.VERIFIED,
+            )
+            .order_by(Payment.verified_at.desc())
+        )
+        if verified is not None:
+            return verified
+        raise PaymentStateError(
+            "Order is past payment stage but no verified payment record exists"
+        )
+
+    if order.status not in {
+        OrderStatus.PENDING,
+        OrderStatus.AWAITING_PAYMENT,
+    }:
+        raise PaymentStateError(
+            f"Order status {order.status.value!r} cannot be manually approved"
+        )
+
+    payment = await create_pending_payment(
+        session,
+        order_id=order.id,
+        provider="manual",
+        raw_reference=f"approved-by-telegram:{actor_telegram_id}",
+    )
+    return await verify_payment(
+        session,
+        payment_id=payment.id,
+        provider_transaction_id=f"manual:{payment.id}",
+        verified_amount=order.price_amount,
+        verified_currency=order.currency,
+    )
