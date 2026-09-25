@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     telegram_owner_ids: list[int] = []
     manual_payment_instructions: str | None = None
 
+    admin_panel_api_key: SecretStr | None = None
+
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/panelprimepasar"
     redis_url: str = "redis://localhost:6379/0"
 
