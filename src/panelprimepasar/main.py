@@ -7,7 +7,7 @@ from panelprimepasar.config import get_settings
 async def main() -> None:
     settings = get_settings()
     bot = build_bot(settings)
-    dispatcher = build_dispatcher()
+    dispatcher = build_dispatcher(settings)
 
     try:
         await dispatcher.start_polling(bot)
