@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from uuid import UUID
 
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -76,4 +77,13 @@ def admin_order_actions_keyboard(order: Order) -> InlineKeyboardMarkup:
 
     builder.button(text="↩️ سفارش‌ها", callback_data="admin:orders")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def admin_order_notification_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🧾 مشاهده و بررسی سفارش",
+        callback_data=f"admin:order:{order_id}",
+    )
     return builder.as_markup()
