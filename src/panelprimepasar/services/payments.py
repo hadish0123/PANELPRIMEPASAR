@@ -47,6 +47,9 @@ async def create_pending_payment(
         .order_by(Payment.created_at.desc())
     )
     if existing is not None:
+        if raw_reference is not None:
+            existing.raw_reference = raw_reference
+            await session.flush()
         return existing
 
     payment = Payment(
