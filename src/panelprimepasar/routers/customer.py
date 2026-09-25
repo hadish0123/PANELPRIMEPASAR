@@ -11,7 +11,7 @@ from panelprimepasar.keyboards.customer import (
     plan_actions_keyboard,
     plans_keyboard,
 )
-from panelprimepasar.models import OrderStatus, Plan
+from panelprimepasar.models import Customer, OrderStatus
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
     get_active_plan,
@@ -59,7 +59,7 @@ def order_status_label(status: OrderStatus) -> str:
     return labels[status]
 
 
-async def ensure_customer(message: Message, session: AsyncSession):
+async def ensure_customer(message: Message, session: AsyncSession) -> Customer | None:
     user = message.from_user
     if user is None:
         return None
