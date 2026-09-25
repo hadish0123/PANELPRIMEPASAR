@@ -24,6 +24,7 @@ from panelprimepasar.keyboards.admin import (
 )
 from panelprimepasar.models import Customer, Order, Plan
 from panelprimepasar.routers.customer import format_money, format_quota, order_status_label
+from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.payments import PaymentStateError, approve_manual_order
 from panelprimepasar.services.plan_inputs import (
     parse_price_toman,
@@ -180,6 +181,23 @@ async def _run_provisioning(
     finally:
         await client.close()
 
+    action = "credentials.reissued" if reissue else "provisioning.succeeded"
+    if not outcome.success:
+        action = "provisioning.failed"
+    await record_audit_event(
+        session,
+        actor_type="telegram_owner",
+        actor_id=str(callback.from_user.id),
+        action=action,
+        entity_type="order",
+        entity_id=str(order_id),
+        correlation_id=str(order_id),
+        metadata={
+            "success": outcome.success,
+            "already_provisioned": outcome.already_provisioned,
+            "error_code": outcome.error_code,
+        },
+    )
     await session.commit()
 
     if not outcome.success:
@@ -203,6 +221,22 @@ async def _run_provisioning(
         customer=customer,
         outcome=outcome,
     )
+    await record_audit_event(
+        session,
+        actor_type="system",
+        actor_id=None,
+        action=(
+            "credentials.delivery_succeeded"
+            if delivered
+            else "credentials.delivery_failed"
+        ),
+        entity_type="order",
+        entity_id=str(order_id),
+        correlation_id=str(order_id),
+        metadata={"telegram_user_id": customer.telegram_user_id},
+    )
+    await session.commit()
+
     if delivered:
         await callback.message.answer(
             "پنل ساخته شد و مشخصات برای مشتری در Telegram ارسال شد."
@@ -350,6 +384,21 @@ async def create_plan_validity(
     )
     session.add(plan)
     await session.flush()
+    await record_audit_event(
+        session,
+        actor_type="telegram_owner",
+        actor_id=str(user.id),
+        action="plan.created",
+        entity_type="plan",
+        entity_id=str(plan.id),
+        correlation_id=str(plan.id),
+        metadata={
+            "quota_bytes": plan.quota_bytes,
+            "price_amount": plan.price_amount,
+            "currency": plan.currency,
+            "validity_days": plan.validity_days,
+        },
+    )
     await state.clear()
 
     validity_text = (
@@ -415,6 +464,16 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
 
     plan.is_active = not plan.is_active
     await session.flush()
+    await record_audit_event(
+        session,
+        actor_type="telegram_owner",
+        actor_id=str(callback.from_user.id),
+        action="plan.status_changed",
+        entity_type="plan",
+        entity_id=str(plan.id),
+        correlation_id=str(plan.id),
+        metadata={"is_active": plan.is_active},
+    )
     await callback.answer("وضعیت پلن تغییر کرد.")
 
     plans = list(
@@ -505,10 +564,25 @@ async def approve_order(
 
     await callback.answer("در حال تأیید و ساخت پنل...")
     try:
-        await approve_manual_order(
+        payment = await approve_manual_order(
             session,
             order_id=order_id,
             actor_telegram_id=callback.from_user.id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="telegram_owner",
+            actor_id=str(callback.from_user.id),
+            action="payment.manual_approved",
+            entity_type="order",
+            entity_id=str(order_id),
+            correlation_id=str(order_id),
+            metadata={
+                "payment_id": str(payment.id),
+                "provider": payment.provider,
+                "amount": payment.amount,
+                "currency": payment.currency,
+            },
         )
         await session.commit()
     except PaymentStateError as exc:
