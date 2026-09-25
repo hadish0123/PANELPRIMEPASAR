@@ -1,9 +1,8 @@
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from panelprimepasar.config import get_settings
 from panelprimepasar.db import engine
 
 
