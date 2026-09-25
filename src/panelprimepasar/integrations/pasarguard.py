@@ -195,7 +195,10 @@ class PasarGuardClient:
 
         for role in roles:
             id_matches = role_id is None or role.id == role_id
-            name_matches = (\n                normalized_name is None\n                or role.name.strip().casefold() == normalized_name\n            )
+            name_matches = (
+                normalized_name is None
+                or role.name.strip().casefold() == normalized_name
+            )
             if id_matches and name_matches:
                 if role.is_owner:
                     raise PasarGuardConfigurationError(
