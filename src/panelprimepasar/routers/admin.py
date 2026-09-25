@@ -271,6 +271,78 @@ async def admin_home(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer("مدیریت فروش پنل", reply_markup=admin_menu())
 
 
+
+
+@router.callback_query(F.data == "admin:pasarguard_check")
+async def pasarguard_check(callback: CallbackQuery) -> None:
+    if not _is_owner(callback.from_user.id):
+        await _reject_callback(callback)
+        return
+
+    await callback.answer("در حال بررسی اتصال...")
+    if not isinstance(callback.message, Message):
+        return
+
+    settings = get_settings()
+    try:
+        client = build_pasarguard_client(settings)
+    except PasarGuardConfigurationError as exc:
+        await callback.message.answer(
+            "اتصال PasarGuard تنظیم نشده است.\n"
+            f"<code>{escape(str(exc))}</code>",
+            reply_markup=admin_menu(),
+        )
+        return
+
+    try:
+        healthy = await client.health()
+        current_admin = await client.get_current_admin()
+        roles = await client.list_roles_simple()
+
+        target_text = "تنظیم نشده"
+        if (
+            settings.pasarguard_reseller_role_id is not None
+            or settings.pasarguard_reseller_role_name
+        ):
+            try:
+                target = await client.resolve_reseller_role(
+                    role_id=settings.pasarguard_reseller_role_id,
+                    role_name=settings.pasarguard_reseller_role_name,
+                )
+                target_text = f"{escape(target.name)} (ID {target.id})"
+            except PasarGuardError as exc:
+                target_text = f"نامعتبر: {escape(str(exc))}"
+
+        role_rows = [
+            f"• {escape(role.name)} — ID <code>{role.id}</code>"
+            + (" — owner" if role.is_owner else "")
+            for role in roles
+        ]
+        current_role = (
+            escape(current_admin.role.name)
+            if current_admin.role is not None
+            else "نامشخص"
+        )
+        text = (
+            "<b>PasarGuard diagnostics</b>\n\n"
+            f"Health: <b>{'OK' if healthy else 'FAIL'}</b>\n"
+            f"API identity: <code>{escape(current_admin.username)}</code>\n"
+            f"API role: <b>{current_role}</b>\n"
+            f"Role هدف فروش: <b>{target_text}</b>\n\n"
+            "<b>Roleهای قابل مشاهده:</b>\n"
+            + ("\n".join(role_rows) if role_rows else "هیچ Role قابل مشاهده نیست.")
+        )
+        await callback.message.answer(text, reply_markup=admin_menu())
+    except PasarGuardError as exc:
+        await callback.message.answer(
+            "بررسی PasarGuard ناموفق بود.\n"
+            f"<code>{escape(str(exc))}</code>",
+            reply_markup=admin_menu(),
+        )
+    finally:
+        await client.close()
+
+
 @router.callback_query(F.data == "admin:create_plan")
 async def create_plan_start(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_owner(callback.from_user.id):
