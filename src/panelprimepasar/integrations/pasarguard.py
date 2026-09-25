@@ -59,6 +59,16 @@ class PasarGuardAdmin(BaseModel):
     role: PasarGuardRole | None = None
 
 
+class PasarGuardAdminsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    admins: list[PasarGuardAdmin]
+    total: int
+    active: int = 0
+    disabled: int = 0
+    limited: int = 0
+
+
 class PasarGuardAdminCreate(BaseModel):
     username: str
     password: str
@@ -148,6 +158,7 @@ class PasarGuardClient:
         *,
         protected: bool = True,
         json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
     ) -> httpx.Response:
         headers = self._auth_headers() if protected else {}
         try:
@@ -156,6 +167,7 @@ class PasarGuardClient:
                 path,
                 headers=headers,
                 json=json,
+                params=params,
             )
         except httpx.HTTPError as exc:
             raise PasarGuardTransportError("Could not reach PasarGuard") from exc
@@ -210,6 +222,18 @@ class PasarGuardClient:
             "Configured PasarGuard reseller role was not found"
         )
 
+    async def find_admin_by_username(self, username: str) -> PasarGuardAdmin | None:
+        response = await self._request(
+            "GET",
+            "/api/admins",
+            params={"usernames": username, "limit": "1"},
+        )
+        payload = PasarGuardAdminsResponse.model_validate(response.json())
+        for admin in payload.admins:
+            if admin.username == username:
+                return admin
+        return None
+
     async def create_admin(
         self,
         *,
@@ -232,6 +256,49 @@ class PasarGuardClient:
             json=payload.model_dump(exclude_none=True),
         )
         return PasarGuardAdmin.model_validate(response.json())
+
+    async def ensure_admin(
+        self,
+        *,
+        username: str,
+        password: str,
+        role_id: int,
+        data_limit: int | None,
+        note: str | None = None,
+    ) -> PasarGuardAdmin:
+        existing = await self.find_admin_by_username(username)
+        if existing is not None:
+            if existing.id is None:
+                raise PasarGuardError("Existing PasarGuard admin is missing its ID")
+            return await self.modify_admin_by_id(
+                existing.id,
+                password=password,
+                role_id=role_id,
+                data_limit=data_limit,
+                status="active",
+                note=note,
+            )
+
+        try:
+            return await self.create_admin(
+                username=username,
+                password=password,
+                role_id=role_id,
+                data_limit=data_limit,
+                note=note,
+            )
+        except PasarGuardConflictError:
+            existing = await self.find_admin_by_username(username)
+            if existing is None or existing.id is None:
+                raise
+            return await self.modify_admin_by_id(
+                existing.id,
+                password=password,
+                role_id=role_id,
+                data_limit=data_limit,
+                status="active",
+                note=note,
+            )
 
     async def modify_admin_by_id(
         self,
