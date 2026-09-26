@@ -9,11 +9,17 @@ from panelprimepasar.models import Order, OrderStatus, Plan
 
 def admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="📊 داشبورد", callback_data="admin:dashboard")
+    builder.button(text="👥 مشتریان", callback_data="admin:customers")
+    builder.button(text="🧾 سفارش‌ها", callback_data="admin:orders")
+    builder.button(text="💳 پرداخت‌ها", callback_data="admin:payments")
+    builder.button(text="📋 پلن‌ها", callback_data="admin:plans")
     builder.button(text="➕ پلن جدید", callback_data="admin:create_plan")
-    builder.button(text="📋 مدیریت پلن‌ها", callback_data="admin:plans")
-    builder.button(text="🧾 سفارش‌های اخیر", callback_data="admin:orders")
-    builder.button(text="🔌 بررسی اتصال پاسارگارد", callback_data="admin:pasarguard_check")
-    builder.adjust(1)
+    builder.button(text="🎧 پشتیبانی", callback_data="admin:support")
+    builder.button(text="👮 مدیران", callback_data="admin:staff")
+    builder.button(text="🔌 پاسارگارد", callback_data="admin:pasarguard_check")
+    builder.button(text="📜 لاگ‌ها", callback_data="admin:audit")
+    builder.adjust(2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
