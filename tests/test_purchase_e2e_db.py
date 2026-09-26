@@ -25,6 +25,7 @@ class PurchaseClient:
     def __init__(self) -> None:
         self.ensure_calls = 0
         self.data_limits: list[int | None] = []
+        self.sync_data_limits: list[int | None] = []
 
     async def resolve_reseller_role(
         self,
@@ -60,6 +61,25 @@ class PurchaseClient:
                 name="reseller",
                 is_owner=False,
             ),
+        )
+
+    async def modify_admin_by_id(
+        self,
+        admin_id: int,
+        *,
+        password: str | None = None,
+        role_id: int | None = None,
+        data_limit: int | None = None,
+        status: str | None = None,
+        note: str | None = None,
+    ) -> PasarGuardAdmin:
+        del password, role_id, note
+        self.sync_data_limits.append(data_limit)
+        return PasarGuardAdmin(
+            id=admin_id,
+            username="reseller",
+            data_limit=data_limit,
+            status=status or "active",
         )
 
 
@@ -171,6 +191,7 @@ async def test_purchase_payment_to_reseller_provisioning_is_idempotent() -> None
         assert repeated_payment.id == payment.id
         assert client.ensure_calls == 1
         assert client.data_limits == [plan.quota_bytes]
+        assert client.sync_data_limits == [plan.quota_bytes]
         assert order.status == OrderStatus.COMPLETED
         assert account is not None
         assert account.quota_bytes == plan.quota_bytes

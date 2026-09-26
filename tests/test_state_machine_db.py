@@ -92,6 +92,7 @@ class FakeProvisioningClient:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.ensure_calls = 0
+        self.modify_calls = 0
 
     async def resolve_reseller_role(
         self,
@@ -123,6 +124,25 @@ class FakeProvisioningClient:
             data_limit=data_limit,
             status="active",
             role=PasarGuardRole(id=role_id, name="نمایندگان", is_owner=False),
+        )
+
+    async def modify_admin_by_id(
+        self,
+        admin_id: int,
+        *,
+        password: str | None = None,
+        role_id: int | None = None,
+        data_limit: int | None = None,
+        status: str | None = None,
+        note: str | None = None,
+    ) -> PasarGuardAdmin:
+        del password, role_id, note
+        self.modify_calls += 1
+        return PasarGuardAdmin(
+            id=admin_id,
+            username="reseller",
+            data_limit=data_limit,
+            status=status or "active",
         )
 
 
@@ -157,6 +177,7 @@ async def test_provisioning_is_locally_idempotent() -> None:
         assert second.success is True
         assert second.already_provisioned is True
         assert client.ensure_calls == 1
+        assert client.modify_calls == 1
         assert order.status == OrderStatus.COMPLETED
         assert account is not None
         assert account.pasarguard_admin_id == 101

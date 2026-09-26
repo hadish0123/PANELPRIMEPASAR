@@ -34,6 +34,11 @@ def test_plan_form_uses_gigabytes_without_day_limit() -> None:
     assert 'id="pdays"' not in _ADMIN_JS
 
 
+def test_completed_orders_offer_quota_sync_without_password_rotation() -> None:
+    assert "actions.push('همگام‌سازی حجم / صدور مجدد')" in _ADMIN_JS
+    assert "sync:'fulfill'" in _ADMIN_JS
+
+
 def test_plan_api_accepts_zero_as_unlimited() -> None:
     payload = PlanCreateRequest(
         name="نامحدود",

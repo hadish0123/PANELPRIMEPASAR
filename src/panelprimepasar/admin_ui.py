@@ -722,7 +722,7 @@ function orderActionHtml(r){
  if(unpaid&&can('approve_payments'))actions.push('پرداخت');
  if(unpaid&&can('manage_orders'))actions.push('لغو');
  if((r.status==='paid'||r.status==='provisioning'||r.status==='failed')&&can('manage_pasarguard'))actions.push('اجرا');
- if(r.status==='completed'&&r.kind==='new'&&can('manage_pasarguard'))actions.push('صدور مجدد');
+ if(r.status==='completed'&&r.kind==='new'&&can('manage_pasarguard'))actions.push('همگام‌سازی حجم / صدور مجدد');
  return actions.length?actions.join(' / '):'—'
 }
 function requiredText(selector,label,min=1,max=Infinity){
@@ -759,9 +759,9 @@ function httpUrl(value){
  return parsed.href.replace(/\/$/,'')
 }
 async function orderActionMenu(id,button){
- const choice=(prompt('عملیات: approve / reject / cancel / fulfill / reissue','')||'').trim().toLowerCase();
+ const choice=(prompt('عملیات: approve / reject / cancel / fulfill / sync / reissue','')||'').trim().toLowerCase();
  if(!choice)return;
- const map={approve:'approve-manual',reject:'reject-payment',cancel:'cancel',fulfill:'fulfill',reissue:'reissue-credentials'};
+ const map={approve:'approve-manual',reject:'reject-payment',cancel:'cancel',fulfill:'fulfill',sync:'fulfill',reissue:'reissue-credentials'};
  const endpoint=map[choice];
  if(!endpoint){notify('عملیات معتبر نیست.');return}
  if(['reject','cancel'].includes(choice)&&!confirm('این عملیات قابل بازگشت نیست. ادامه می‌دهید؟'))return;

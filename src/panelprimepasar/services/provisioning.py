@@ -49,6 +49,17 @@ class ProvisioningClient(Protocol):
         note: str | None = None,
     ) -> PasarGuardAdmin: ...
 
+    async def modify_admin_by_id(
+        self,
+        admin_id: int,
+        *,
+        password: str | None = None,
+        role_id: int | None = None,
+        data_limit: int | None = None,
+        status: str | None = None,
+        note: str | None = None,
+    ) -> PasarGuardAdmin: ...
+
 
 @dataclass(frozen=True, slots=True)
 class ProvisionedCredentials:
@@ -259,13 +270,38 @@ class ProvisioningService:
             existing_account is not None
             and existing_account.pasarguard_admin_id is not None
         ):
-            await self._ensure_subscription(
+            job = await self._get_job(session, order.id)
+            job.attempts += 1
+            try:
+                await self.client.modify_admin_by_id(
+                    existing_account.pasarguard_admin_id,
+                    data_limit=order.quota_bytes,
+                    status="active",
+                    note=f"PANELPRIMEPASAR quota sync order {order.id}",
+                )
+            except PasarGuardError as exc:
+                job.status = ProvisioningStatus.FAILED
+                job.last_error_code = type(exc).__name__
+                job.last_error_message = str(exc)[:1000]
+                await session.flush()
+                return ProvisioningOutcome(
+                    success=False,
+                    already_provisioned=True,
+                    error_code=job.last_error_code,
+                    error_message=job.last_error_message,
+                )
+
+            existing_account.quota_bytes = order.quota_bytes
+            existing_account.is_active = True
+            subscription = await self._ensure_subscription(
                 session,
                 order=order,
                 account=existing_account,
             )
+            subscription.quota_bytes = order.quota_bytes
+            subscription.expires_at = None
+            subscription.status = SubscriptionStatus.ACTIVE.value
             order.status = OrderStatus.COMPLETED
-            job = await self._get_job(session, order.id)
             job.status = ProvisioningStatus.SUCCEEDED
             job.completed_at = datetime.now(UTC)
             job.last_error_code = None
