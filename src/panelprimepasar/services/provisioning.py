@@ -109,10 +109,12 @@ class ProvisioningService:
         client: ProvisioningClient,
         reseller_role_id: int | None,
         reseller_role_name: str | None,
+        pasarguard_instance_id: UUID | None = None,
     ) -> None:
         self.client = client
         self.reseller_role_id = reseller_role_id
         self.reseller_role_name = reseller_role_name
+        self.pasarguard_instance_id = pasarguard_instance_id
 
     async def _get_job(self, session: AsyncSession, order_id: UUID) -> ProvisioningJob:
         job = await session.scalar(
@@ -212,6 +214,7 @@ class ProvisioningService:
                 error_message=str(exc)[:1000],
             )
 
+        account.pasarguard_instance_id = self.pasarguard_instance_id
         account.pasarguard_admin_id = admin.id
         account.role_id = role.id
         account.role_name = role.name
@@ -331,6 +334,7 @@ class ProvisioningService:
         account = PasarGuardAccount(
             customer_id=customer.id,
             order_id=order.id,
+            pasarguard_instance_id=self.pasarguard_instance_id,
             pasarguard_admin_id=admin.id,
             username=username,
             role_id=role.id,
