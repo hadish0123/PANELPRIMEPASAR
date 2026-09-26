@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.integrations.pasarguard import (
@@ -151,7 +151,7 @@ class ProvisioningService:
         *,
         admin_id: int,
         order_id: UUID,
-    ):
+    ) -> Select[tuple[PasarGuardAccount]]:
         query = select(PasarGuardAccount).where(
             PasarGuardAccount.pasarguard_admin_id == admin_id,
             PasarGuardAccount.order_id != order_id,
@@ -172,7 +172,6 @@ class ProvisioningService:
         collision: PasarGuardAccount,
         desired_admin: PasarGuardAdmin,
         desired_username: str,
-        order_id: UUID,
     ) -> bool:
         if desired_admin.id is None or desired_admin.username != desired_username:
             return False
@@ -454,7 +453,6 @@ class ProvisioningService:
                 collision=collision,
                 desired_admin=admin,
                 desired_username=username,
-                order_id=order.id,
             )
             if not repaired:
                 job.status = ProvisioningStatus.FAILED
