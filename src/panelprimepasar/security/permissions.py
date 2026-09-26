@@ -18,6 +18,7 @@ class Permission(StrEnum):
     MANAGE_ORDERS = "manage_orders"
     VIEW_PAYMENTS = "view_payments"
     APPROVE_PAYMENTS = "approve_payments"
+    MANAGE_PAYMENT_METHODS = "manage_payment_methods"
     MANAGE_WALLETS = "manage_wallets"
     MANAGE_DISCOUNTS = "manage_discounts"
     MANAGE_PASARGUARD = "manage_pasarguard"
@@ -38,6 +39,7 @@ ROLE_PERMISSIONS: dict[AdminRole, frozenset[Permission]] = {
             Permission.MANAGE_ORDERS,
             Permission.VIEW_PAYMENTS,
             Permission.APPROVE_PAYMENTS,
+            Permission.MANAGE_PAYMENT_METHODS,
             Permission.MANAGE_WALLETS,
             Permission.MANAGE_DISCOUNTS,
             Permission.MANAGE_PASARGUARD,
