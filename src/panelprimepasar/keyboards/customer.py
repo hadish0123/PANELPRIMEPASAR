@@ -60,6 +60,10 @@ def payment_receipt_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
         callback_data=f"wallet_pay:{order_id}",
     )
     builder.button(
+        text="🎟 کد تخفیف",
+        callback_data=f"discount:{order_id}",
+    )
+    builder.button(
         text="📎 ارسال رسید پرداخت",
         callback_data=f"receipt:{order_id}",
     )
