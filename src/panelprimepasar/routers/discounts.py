@@ -255,6 +255,7 @@ async def discount_code_received(
         )
         return
 
+    payment_methods = await list_enabled_payment_methods(session)
     await message.answer(
         "روش پرداخت را انتخاب کنید یا رسید پرداخت را ارسال کنید.",
         reply_markup=payment_receipt_keyboard(order.id, payment_methods),
