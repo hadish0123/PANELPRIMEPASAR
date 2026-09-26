@@ -55,6 +55,7 @@ body{
 }
 button,input,select{font:inherit}
 button{user-select:none}
+button:disabled{cursor:wait;opacity:.62;transform:none!important}
 a{color:inherit}
 .hidden{display:none!important}
 .muted{color:var(--muted)}
@@ -249,8 +250,9 @@ header{
   border-bottom:1px solid rgba(137,111,66,.10);
 }
 .header-title-wrap{display:flex;align-items:center;gap:12px}
+.header-title-wrap,.header-actions{min-width:0}
 .header-kicker{font-size:10px;letter-spacing:.15em;color:var(--gold-strong);font-weight:900}
-#pageTitle{font-size:19px;font-weight:900;margin-top:2px;color:var(--navy)}
+#pageTitle{font-size:19px;font-weight:900;margin-top:2px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .header-actions{display:flex;align-items:center;gap:10px}
 .status-pill{
   display:flex;align-items:center;gap:8px;
@@ -261,8 +263,19 @@ header{
   box-shadow:0 5px 15px rgba(69,53,26,.05);
 }
 .status-pill:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--success)}
+#status{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #view{padding-top:28px;animation:fadeIn .22s ease}
 @keyframes fadeIn{from{opacity:.3;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+.notice{
+  position:fixed;inset-inline-start:24px;bottom:24px;z-index:80;
+  width:min(520px,calc(100vw - 48px));
+  padding:13px 15px;border-radius:12px;
+  border:1px solid #e9c3c6;background:#fff1f1;color:#8f3039;
+  box-shadow:0 16px 46px rgba(63,49,27,.18);
+  line-height:1.7;font-size:12px;
+}
+.notice.success{border-color:#b9dacb;background:#eef9f3;color:#1f6f50}
 
 /* Content */
 .page-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:18px}
@@ -390,27 +403,38 @@ td{color:#394457}
   .shell{grid-template-columns:244px minmax(0,1fr)}
 }
 @media(max-width:860px){
-  #login{grid-template-columns:1fr;margin:24px auto}
+  #login{grid-template-columns:1fr;margin:24px auto;min-height:0}
   .login-visual{display:none}
   .login-form{padding:36px 28px}
   .shell{grid-template-columns:1fr}
   .side{position:relative;height:auto;border-left:0;border-bottom:1px solid #dfd4c3;padding:14px}
   .side-head{padding-bottom:12px}
   .nav{display:flex;overflow:auto;gap:6px;padding-bottom:4px}
-  .nav-label,.side-footer{display:none}
+  .nav-label{display:none}
   .nav button{min-width:max-content;width:auto;padding:8px 11px}
   .nav button.active:after{display:none}
+  .side-footer{display:block;margin-top:10px;padding-top:10px}
+  .side-footer .btn{margin:0}
   main{padding:0 16px 28px}
   header{height:64px}
 }
 @media(max-width:560px){
   .grid{grid-template-columns:1fr}
+  .card{padding:14px}
   .login-form{padding:30px 22px}
   .login-form h1{font-size:26px}
   header{align-items:center}
   .header-kicker{display:none}
   #pageTitle{font-size:16px}
-  .status-pill{padding:7px 9px}
+  .status-pill{padding:7px 9px;max-width:128px}
+  #view{padding-top:20px}
+  .toolbar{align-items:stretch}
+  .toolbar > input,.toolbar > select,.toolbar > .btn.small{width:100%!important;max-width:none}
+  .toolbar > label{
+    width:100%;min-height:42px;display:flex;align-items:center;gap:8px;
+    padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fffdfa;
+  }
+  .notice{inset-inline:12px;bottom:12px;width:calc(100vw - 24px)}
 }
 </style>
 </head>
@@ -500,7 +524,7 @@ td{color:#394457}
       </div>
 
       <div class="side-footer">
-        <button class="danger" onclick="logout()"><span class="nav-icon">↪</span>خروج امن</button>
+        <button class="btn danger side-logout" type="button" onclick="logout()"><span class="nav-icon">↪</span>خروج امن</button>
       </div>
     </aside>
 
@@ -516,6 +540,7 @@ td{color:#394457}
           <div class="status-pill"><span id="status">آماده</span></div>
         </div>
       </header>
+      <div id="notice" class="notice hidden" role="status" aria-live="polite"></div>
       <div id="view"></div>
     </main>
   </div>
@@ -527,6 +552,40 @@ td{color:#394457}
 _ADMIN_JS = r"""
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let noticeTimer=0;
+function humanError(value){
+  if(value instanceof Error)return humanError(value.message);
+  if(typeof value==='string'&&value.trim())return value.trim();
+  if(Array.isArray(value))return value.map(item=>humanError(item?.msg??item?.message??item)).filter(Boolean).join(' • ');
+  if(value&&typeof value==='object'){
+    if('detail' in value)return humanError(value.detail);
+    if('message' in value)return humanError(value.message);
+    try{return JSON.stringify(value)}catch{}
+  }
+  return 'خطای ناشناخته';
+}
+function notify(message,kind='error'){
+  const box=$('#notice');if(!box)return;
+  box.textContent=humanError(message);
+  box.className='notice '+kind;
+  clearTimeout(noticeTimer);
+  noticeTimer=setTimeout(()=>box.classList.add('hidden'),6000);
+}
+async function runAction(button,task,successMessage=''){
+  if(button?.disabled)return null;
+  if(button){button.disabled=true;button.setAttribute('aria-busy','true')}
+  try{
+    const result=await task();
+    if(successMessage)notify(successMessage,'success');
+    return result
+  }catch(error){notify(error);return null}
+  finally{if(button){button.disabled=false;button.removeAttribute('aria-busy')}}
+}
+window.addEventListener('unhandledrejection',event=>{
+  event.preventDefault();
+  notify(event.reason);
+  const status=$('#status');if(status)status.textContent='خطا در انجام عملیات';
+});
 function token(){return sessionStorage.getItem('adminToken')||''}
 function permissions(){try{return JSON.parse(sessionStorage.getItem('adminPermissions')||'[]')}catch{return []}}
 function can(permission){return permissions().includes(permission)}
@@ -543,14 +602,23 @@ async function api(path,opts={}){
   const r=await fetch(path,{...opts,headers});
   if(r.status===401){logout();throw new Error('دسترسی نامعتبر یا منقضی‌شده')}
   if(r.status===403)throw new Error('برای این بخش دسترسی ندارید');
-  if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+  if(!r.ok){
+    let detail='HTTP '+r.status;
+    try{const data=await r.json();detail=data.detail??data.message??detail}catch{}
+    throw new Error(humanError(detail))
+  }
   return r.status===204?null:r.json()
 }
 async function login(event){
   if(event)event.preventDefault();
+  $('#loginError').textContent='';
   const username=$('#username').value.trim();
   const password=$('#password').value;
   const ownerKey=$('#ownerKey').value;
+  if(!ownerKey&&(!username||!password)){
+    $('#loginError').textContent='نام کاربری و رمز عبور یا کلید مدیریت را وارد کنید.';
+    return
+  }
   const body=ownerKey?{api_key:ownerKey}:{username,password};
   try{
     const auth=await fetch('/admin/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -559,12 +627,13 @@ async function login(event){
     sessionStorage.setItem('adminToken',data.token);
     sessionStorage.setItem('adminPermissions',JSON.stringify(data.permissions||[]));
     sessionStorage.setItem('adminRole',data.role||'');
-    $('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')
+    $('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();await show('dashboard')
   }catch(e){
     sessionStorage.removeItem('adminToken');
     sessionStorage.removeItem('adminPermissions');
-    $('#loginError').textContent=e.message
-  }
+    sessionStorage.removeItem('adminRole');
+    $('#loginError').textContent=humanError(e)
+  }finally{$('#password').value='';$('#ownerKey').value=''}
 }
 async function logout(){
   try{await fetch('/admin/auth/logout',{method:'POST'})}catch{}
@@ -589,7 +658,7 @@ function activateNav(name){
 async function show(name){
   activateNav(name);
   $('#status').textContent='در حال بارگذاری...';
-  try{await views[name]();$('#status').textContent='به‌روز و همگام'}catch(e){$('#view').innerHTML='<div class="card" style="color:var(--danger)">'+esc(e.message)+'</div>';$('#status').textContent='خطا در دریافت اطلاعات'}
+  try{await views[name]();$('#status').textContent='به‌روز و همگام'}catch(e){$('#view').innerHTML='<div class="card" style="color:var(--danger)">'+esc(humanError(e))+'</div>';$('#status').textContent='خطا در دریافت اطلاعات'}
 }
 const views={
  dashboard:async()=>{
@@ -599,52 +668,52 @@ const views={
  },
  customers:async()=>{
   const rows=await api('/admin/customers?limit=100');
-  $('#view').innerHTML='<h1>مشتریان</h1>'+table(rows,[['Telegram',r=>'<code>'+esc(r.telegram_user_id)+'</code>'],['Username',r=>esc(r.username)],['نام',r=>esc((r.first_name||'')+' '+(r.last_name||''))],['وضعیت',r=>r.blocked?'🚫 مسدود':'✅ فعال'],['عملیات',r=>(can('manage_users')?'<button class="btn small '+(r.blocked?'':'danger')+'" onclick="blockCustomer(\''+r.id+'\','+(!r.blocked)+')">'+(r.blocked?'رفع مسدودی':'مسدود')+'</button>':'')+(can('manage_wallets')?'<button class="btn small" onclick="walletCredit(\''+r.id+'\')">💰 کیف پول</button>':'')]])
+  $('#view').innerHTML='<h1>مشتریان</h1>'+table(rows,[['Telegram',r=>'<code>'+esc(r.telegram_user_id)+'</code>'],['Username',r=>esc(r.username)],['نام',r=>esc((r.first_name||'')+' '+(r.last_name||''))],['وضعیت',r=>r.blocked?'🚫 مسدود':'✅ فعال'],['عملیات',r=>(can('manage_users')?'<button type="button" class="btn small '+(r.blocked?'':'danger')+'" onclick="blockCustomer(\''+r.id+'\','+(!r.blocked)+',this)">'+(r.blocked?'رفع مسدودی':'مسدود')+'</button>':'')+(can('manage_wallets')?'<button type="button" class="btn small" onclick="walletCredit(\''+r.id+'\',this)">💰 کیف پول</button>':'')]])
  },
  plans:async()=>{
   const rows=await api('/admin/plans');
-  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" placeholder="نام"><input id="pquota" type="number" placeholder="حجم بایت"><input id="pprice" type="number" placeholder="قیمت تومان"><input id="pdays" type="number" placeholder="روز"><button class="btn small" onclick="createPlan()">➕ ساخت</button></div></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['اعتبار',r=>esc(r.validity_days??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])
+  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" maxlength="128" placeholder="نام"><input id="pquota" type="number" min="1" inputmode="numeric" placeholder="حجم بایت"><input id="pprice" type="number" min="0" inputmode="numeric" placeholder="قیمت تومان"><input id="pdays" type="number" min="1" inputmode="numeric" placeholder="روز"><button type="button" class="btn small" onclick="createPlan(this)">➕ ساخت</button></div></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['اعتبار',r=>esc(r.validity_days??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
  },
  discounts:async()=>{
   const rows=await api('/admin/discounts');
-  $('#view').innerHTML='<h1>کدهای تخفیف</h1><div class="card"><div class="toolbar"><input id="dcode" placeholder="کد"><select id="dkind"><option value="percent">درصدی</option><option value="fixed">مبلغ ثابت</option></select><input id="dvalue" type="number" placeholder="مقدار"><input id="dmax" type="number" placeholder="حداکثر استفاده"><button class="btn small" onclick="createDiscount()">➕ ساخت</button></div></div>'+table(rows,[['کد',r=>'<code>'+esc(r.code)+'</code>'],['نوع',r=>esc(r.kind)],['مقدار',r=>r.kind==='percent'?esc(r.value_percent)+'%':Number(r.value_amount||0).toLocaleString()],['استفاده',r=>esc(r.used_count)+' / '+esc(r.max_uses??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="toggleDiscount(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])
+  $('#view').innerHTML='<h1>کدهای تخفیف</h1><div class="card"><div class="toolbar"><input id="dcode" maxlength="64" placeholder="کد"><select id="dkind"><option value="percent">درصدی</option><option value="fixed">مبلغ ثابت</option></select><input id="dvalue" type="number" min="1" inputmode="numeric" placeholder="مقدار"><input id="dmax" type="number" min="1" inputmode="numeric" placeholder="حداکثر استفاده"><button type="button" class="btn small" onclick="createDiscount(this)">➕ ساخت</button></div></div>'+table(rows,[['کد',r=>'<code>'+esc(r.code)+'</code>'],['نوع',r=>esc(r.kind)],['مقدار',r=>r.kind==='percent'?esc(r.value_percent)+'%':Number(r.value_amount||0).toLocaleString()],['استفاده',r=>esc(r.used_count)+' / '+esc(r.max_uses??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="toggleDiscount(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
  },
- orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['عملیات',r=>'<button class="btn small" onclick="orderActionMenu(\''+r.id+'\')">⚙️ عملیات</button><div class="muted">'+esc(orderActionHtml(r))+'</div>']])},
+ orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['عملیات',r=>'<button type="button" class="btn small" onclick="orderActionMenu(\''+r.id+'\',this)">⚙️ عملیات</button><div class="muted">'+esc(orderActionHtml(r))+'</div>']])},
  payments:async()=>{const rows=await api('/admin/payments?limit=100');$('#view').innerHTML='<h1>پرداخت‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['درگاه',r=>esc(r.provider)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>esc(r.status)],['تراکنش',r=>esc(r.transaction_id)]])},
  paymentMethods:async()=>{
   const rows=await api('/admin/payment-methods');
   const form='<div class="card"><h2>افزودن روش پرداخت</h2><div class="toolbar">'+
-   '<input id="pmSlug" placeholder="شناسه کوتاه مثل zarinpal">'+
-   '<input id="pmName" placeholder="نام نمایشی">'+
+   '<input id="pmSlug" maxlength="24" autocapitalize="none" placeholder="شناسه کوتاه مثل zarinpal">'+
+   '<input id="pmName" maxlength="128" placeholder="نام نمایشی">'+
    '<select id="pmKind"><option value="manual_card">کارت‌به‌کارت</option><option value="zarinpal">زرین‌پال</option><option value="idpay">IDPay</option><option value="zibal">زیبال</option><option value="nextpay">NextPay</option></select>'+
    '<input id="pmSecret" type="password" autocomplete="new-password" placeholder="Merchant ID / API Key">'+
-   '<input id="pmCard" placeholder="شماره کارت (کارت‌به‌کارت)">'+
+   '<input id="pmCard" inputmode="numeric" maxlength="19" placeholder="شماره کارت (کارت‌به‌کارت)">'+
    '<input id="pmHolder" placeholder="نام صاحب کارت">'+
    '<input id="pmBank" placeholder="بانک">'+
    '<input id="pmIban" placeholder="شبا (اختیاری)">'+
    '<label><input id="pmSandbox" type="checkbox"> تست/Sandbox</label>'+
    '<label><input id="pmEnabled" type="checkbox"> فعال</label>'+
-   '<button class="btn small" onclick="createPaymentMethod()">➕ ذخیره</button></div>'+
+   '<button type="button" class="btn small" onclick="createPaymentMethod(this)">➕ ذخیره</button></div>'+
    '<p class="muted">اطلاعات محرمانه در پاسخ API نمایش داده نمی‌شود و با کلید PAYMENT_CREDENTIALS_MASTER_KEY رمزگذاری می‌شود.</p></div>';
-  $('#view').innerHTML='<h1>روش‌های پرداخت</h1>'+form+table(rows,[['نام',r=>esc(r.display_name)],['نوع',r=>esc(r.kind)],['شناسه',r=>'<code>'+esc(r.slug)+'</code>'],['حالت',r=>r.sandbox?'🧪 تست':'واقعی'],['اعتبارنامه',r=>r.kind==='manual_card'?'—':(r.credentials_configured?'✅ تنظیم شده':'❌ ناقص')],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['عملیات',r=>'<button class="btn small" onclick="togglePaymentMethod(\''+r.id+'\','+(!r.enabled)+')">'+(r.enabled?'غیرفعال':'فعال')+'</button><button class="btn small" onclick="editPaymentMethod(\''+r.id+'\')">✏️ ویرایش</button>']])
+  $('#view').innerHTML='<h1>روش‌های پرداخت</h1>'+form+table(rows,[['نام',r=>esc(r.display_name)],['نوع',r=>esc(r.kind)],['شناسه',r=>'<code>'+esc(r.slug)+'</code>'],['حالت',r=>r.sandbox?'🧪 تست':'واقعی'],['اعتبارنامه',r=>r.kind==='manual_card'?'—':(r.credentials_configured?'✅ تنظیم شده':'❌ ناقص')],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePaymentMethod(\''+r.id+'\','+(!r.enabled)+',this)">'+(r.enabled?'غیرفعال':'فعال')+'</button><button type="button" class="btn small" onclick="editPaymentMethod(\''+r.id+'\',this)">✏️ ویرایش</button>']])
  },
  pasarguardInstances:async()=>{
   const rows=await api('/admin/pasarguard/instances');
   const form='<div class="card"><h2>افزودن PasarGuard</h2><div class="toolbar">'+
-   '<input id="pgName" placeholder="نام">'+
-   '<input id="pgUrl" placeholder="https://panel.example.com">'+
-   '<input id="pgEnv" placeholder="نام Env برای API Key">'+
-   '<input id="pgRole" placeholder="نام نقش نماینده">'+
-   '<input id="pgWeight" type="number" value="100" placeholder="وزن">'+
+   '<input id="pgName" maxlength="128" placeholder="نام">'+
+   '<input id="pgUrl" inputmode="url" placeholder="https://panel.example.com">'+
+   '<input id="pgEnv" maxlength="128" autocapitalize="none" placeholder="نام Env برای API Key">'+
+   '<input id="pgRole" maxlength="128" placeholder="نام نقش نماینده">'+
+   '<input id="pgWeight" type="number" min="1" max="10000" inputmode="numeric" value="100" placeholder="وزن">'+
    '<label><input id="pgEnabled" type="checkbox" checked> فعال</label>'+
-   '<button class="btn small" onclick="createPasarguard()">➕ افزودن</button>'+
-   '<button class="btn small" onclick="checkPasarguards()">🩺 Health Check</button></div>'+
+   '<button type="button" class="btn small" onclick="createPasarguard(this)">➕ افزودن</button>'+
+   '<button type="button" class="btn small" onclick="checkPasarguards(this)">🩺 Health Check</button></div>'+
    '<p class="muted">مقدار واقعی API Key در دیتابیس ذخیره نمی‌شود؛ فقط نام متغیر محیطی ثبت می‌شود.</p></div>';
-  $('#view').innerHTML='<h1>PasarGuard Instances</h1>'+form+table(rows,[['نام',r=>esc(r.name)],['آدرس',r=>'<code>'+esc(r.base_url)+'</code>'],['وزن',r=>esc(r.weight)],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['Health',r=>r.last_health_ok===true?'🟢 سالم':(r.last_health_ok===false?'🔴 خطا':'—')],['Env',r=>'<code>'+esc(r.api_key_env_var||r.bearer_token_env_var||'')+'</code>'],['عملیات',r=>'<button class="btn small" onclick="togglePasarguard(\''+r.id+'\','+(!r.enabled)+')">'+(r.enabled?'غیرفعال':'فعال')+'</button><button class="btn small" onclick="editPasarguard(\''+r.id+'\')">✏️ ویرایش</button>']])
+  $('#view').innerHTML='<h1>PasarGuard Instances</h1>'+form+table(rows,[['نام',r=>esc(r.name)],['آدرس',r=>'<code>'+esc(r.base_url)+'</code>'],['وزن',r=>esc(r.weight)],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['Health',r=>r.last_health_ok===true?'🟢 سالم':(r.last_health_ok===false?'🔴 خطا':'—')],['Env',r=>'<code>'+esc(r.api_key_env_var||r.bearer_token_env_var||'')+'</code>'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePasarguard(\''+r.id+'\','+(!r.enabled)+',this)">'+(r.enabled?'غیرفعال':'فعال')+'</button><button type="button" class="btn small" onclick="editPasarguard(\''+r.id+'\',this)">✏️ ویرایش</button>']])
  },
  subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['انقضا',r=>esc(r.expires_at||'∞')],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
  support:async()=>{const rows=await api('/admin/support?limit=100');$('#view').innerHTML='<h1>پشتیبانی</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['موضوع',r=>esc(r.subject)],['وضعیت',r=>esc(r.status)],['به‌روزرسانی',r=>esc(r.updated_at)]])},
- staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
+ staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
  audit:async()=>{const rows=await api('/admin/audit?limit=100');$('#view').innerHTML='<h1>Audit Log</h1>'+table(rows,[['زمان',r=>esc(r.created_at)],['Actor',r=>esc(r.actor_type)+' '+esc(r.actor_id)],['عملیات',r=>esc(r.action)],['Entity',r=>esc(r.entity_type)+' '+esc(r.entity_id)]])}
 };
 function orderActionHtml(r){
@@ -656,103 +725,218 @@ function orderActionHtml(r){
  if(r.status==='completed'&&r.kind==='new'&&can('manage_pasarguard'))actions.push('صدور مجدد');
  return actions.length?actions.join(' / '):'—'
 }
-async function orderActionMenu(id){
+function requiredText(selector,label,min=1,max=Infinity){
+ const value=$(selector).value.trim();
+ if(value.length<min)throw new Error(label+' باید حداقل '+min+' نویسه باشد.');
+ if(value.length>max)throw new Error(label+' نمی‌تواند بیشتر از '+max+' نویسه باشد.');
+ return value
+}
+function integerInput(selector,label,min,max=Infinity,optional=false){
+ const raw=$(selector).value.trim();
+ if(!raw&&optional)return null;
+ const value=Number(raw);
+ if(!raw||!Number.isInteger(value)||value<min||value>max)throw new Error(label+' معتبر نیست.');
+ return value
+}
+function httpUrl(value){
+ let parsed;
+ try{parsed=new URL(value)}catch{throw new Error('آدرس PasarGuard معتبر نیست.')}
+ if(!['http:','https:'].includes(parsed.protocol))throw new Error('آدرس PasarGuard باید با http یا https شروع شود.');
+ return parsed.href.replace(/\/$/,'')
+}
+async function orderActionMenu(id,button){
  const choice=(prompt('عملیات: approve / reject / cancel / fulfill / reissue','')||'').trim().toLowerCase();
  if(!choice)return;
  const map={approve:'approve-manual',reject:'reject-payment',cancel:'cancel',fulfill:'fulfill',reissue:'reissue-credentials'};
  const endpoint=map[choice];
- if(!endpoint){alert('عملیات معتبر نیست');return}
- const result=await api('/admin/orders/'+id+'/'+endpoint,{method:'POST'});
- alert(result.success===false?'عملیات کامل نشد':'عملیات انجام شد');
- show('orders')
+ if(!endpoint){notify('عملیات معتبر نیست.');return}
+ if(['reject','cancel'].includes(choice)&&!confirm('این عملیات قابل بازگشت نیست. ادامه می‌دهید؟'))return;
+ await runAction(button,async()=>{
+   const result=await api('/admin/orders/'+id+'/'+endpoint,{method:'POST'});
+   if(result.success===false)throw new Error(result.error_message||'عملیات کامل نشد.');
+   await show('orders')
+ },'عملیات سفارش انجام شد.')
 }
-async function blockCustomer(id,blocked){await api('/admin/customers/'+id+'/block',{method:'PATCH',body:JSON.stringify({blocked})});show('customers')}
-async function walletCredit(id){
- const wallet=await api('/admin/customers/'+id+'/wallet');
- const raw=prompt('موجودی فعلی: '+Number(wallet.balance).toLocaleString()+' '+wallet.currency+'\nمبلغ واریز را به تومان وارد کنید:');
- if(!raw)return;
- const amount=Number(raw.replace(/,/g,''));
- if(!Number.isInteger(amount)||amount<=0){alert('مبلغ معتبر نیست');return}
- const key='web-wallet-'+crypto.randomUUID();
- const result=await api('/admin/customers/'+id+'/wallet/credit',{method:'POST',body:JSON.stringify({amount,currency:wallet.currency,idempotency_key:key,reference:'web-admin'})});
- alert('موجودی جدید: '+Number(result.balance).toLocaleString()+' '+result.currency);
+async function blockCustomer(id,blocked,button){
+ if(!confirm(blocked?'این مشتری مسدود شود؟':'مسدودی این مشتری برداشته شود؟'))return;
+ await runAction(button,async()=>{
+   await api('/admin/customers/'+id+'/block',{method:'PATCH',body:JSON.stringify({blocked})});
+   await show('customers')
+ },blocked?'مشتری مسدود شد.':'مسدودی مشتری برداشته شد.')
 }
-async function togglePlan(id,active){await api('/admin/plans/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});show('plans')}
-async function createPlan(){
- const body={name:$('#pname').value,quota_bytes:Number($('#pquota').value),price_amount:Number($('#pprice').value),currency:'IRT',validity_days:$('#pdays').value?Number($('#pdays').value):null};
- await api('/admin/plans',{method:'POST',body:JSON.stringify(body)});show('plans')
+async function walletCredit(id,button){
+ await runAction(button,async()=>{
+   const wallet=await api('/admin/customers/'+id+'/wallet');
+   const raw=prompt('موجودی فعلی: '+Number(wallet.balance).toLocaleString()+' '+wallet.currency+'\nمبلغ واریز را به تومان وارد کنید:');
+   if(raw===null||!raw.trim())return;
+   const amount=Number(raw.replace(/,/g,''));
+   if(!Number.isInteger(amount)||amount<=0)throw new Error('مبلغ معتبر نیست.');
+   if(!confirm('مبلغ '+amount.toLocaleString()+' '+wallet.currency+' به کیف پول واریز شود؟'))return;
+   const key='web-wallet-'+crypto.randomUUID();
+   const result=await api('/admin/customers/'+id+'/wallet/credit',{method:'POST',body:JSON.stringify({amount,currency:wallet.currency,idempotency_key:key,reference:'web-admin'})});
+   notify('موجودی جدید: '+Number(result.balance).toLocaleString()+' '+result.currency,'success')
+ })
 }
-async function createDiscount(){
- const kind=$('#dkind').value,value=Number($('#dvalue').value),maxRaw=$('#dmax').value;
- const body={code:$('#dcode').value,kind,max_uses:maxRaw?Number(maxRaw):null};
- if(kind==='percent')body.value_percent=value;else body.value_amount=value;
- await api('/admin/discounts',{method:'POST',body:JSON.stringify(body)});show('discounts')
+async function togglePlan(id,active,button){
+ if(!confirm(active?'این پلن فعال شود؟':'این پلن غیرفعال شود؟'))return;
+ await runAction(button,async()=>{
+   await api('/admin/plans/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});
+   await show('plans')
+ },active?'پلن فعال شد.':'پلن غیرفعال شد.')
 }
-async function toggleDiscount(id,active){await api('/admin/discounts/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});show('discounts')}
+async function createPlan(button){
+ await runAction(button,async()=>{
+   const body={
+     name:requiredText('#pname','نام پلن',2,128),
+     quota_bytes:integerInput('#pquota','حجم',1),
+     price_amount:integerInput('#pprice','قیمت',0),
+     currency:'IRT',
+     validity_days:integerInput('#pdays','اعتبار روزانه',1,Infinity,true)
+   };
+   await api('/admin/plans',{method:'POST',body:JSON.stringify(body)});
+   await show('plans')
+ },'پلن ساخته شد.')
+}
+async function createDiscount(button){
+ await runAction(button,async()=>{
+   const kind=$('#dkind').value;
+   const value=integerInput('#dvalue','مقدار تخفیف',1,kind==='percent'?100:Infinity);
+   const body={code:requiredText('#dcode','کد تخفیف',2,64),kind,max_uses:integerInput('#dmax','حداکثر استفاده',1,Infinity,true)};
+   if(kind==='percent')body.value_percent=value;else body.value_amount=value;
+   await api('/admin/discounts',{method:'POST',body:JSON.stringify(body)});
+   await show('discounts')
+ },'کد تخفیف ساخته شد.')
+}
+async function toggleDiscount(id,active,button){
+ if(!confirm(active?'این کد تخفیف فعال شود؟':'این کد تخفیف غیرفعال شود؟'))return;
+ await runAction(button,async()=>{
+   await api('/admin/discounts/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});
+   await show('discounts')
+ },active?'کد تخفیف فعال شد.':'کد تخفیف غیرفعال شد.')
+}
 function paymentCredential(kind,value){
  if(!value)return null;
  if(kind==='zarinpal')return {merchant_id:value};
  if(kind==='zibal')return {merchant:value};
  return {api_key:value};
 }
-async function createPaymentMethod(){
- const kind=$('#pmKind').value;
- const publicConfig={};
- if(kind==='manual_card'){
-  publicConfig.card_number=$('#pmCard').value;
-  publicConfig.card_holder=$('#pmHolder').value;
-  if($('#pmBank').value)publicConfig.bank_name=$('#pmBank').value;
-  if($('#pmIban').value)publicConfig.iban=$('#pmIban').value;
- }
- const body={slug:$('#pmSlug').value,kind,display_name:$('#pmName').value,is_enabled:$('#pmEnabled').checked,sandbox:$('#pmSandbox').checked,sort_order:0,public_config:publicConfig,credentials:paymentCredential(kind,$('#pmSecret').value)};
- await api('/admin/payment-methods',{method:'POST',body:JSON.stringify(body)});show('paymentMethods')
+async function createPaymentMethod(button){
+ await runAction(button,async()=>{
+   const kind=$('#pmKind').value;
+   const slug=requiredText('#pmSlug','شناسه روش پرداخت',2,24).toLowerCase();
+   if(!/^[a-z0-9_-]+$/.test(slug))throw new Error('شناسه فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد.');
+   const displayName=requiredText('#pmName','نام نمایشی',1,128);
+   const sandbox=$('#pmSandbox').checked;
+   const publicConfig={};
+   let secret=$('#pmSecret').value.trim();
+   if(kind==='manual_card'){
+     const card=$('#pmCard').value.replace(/[\s-]/g,'');
+     if(!/^\d{16}$/.test(card))throw new Error('شماره کارت باید دقیقاً ۱۶ رقم باشد.');
+     publicConfig.card_number=card;
+     publicConfig.card_holder=requiredText('#pmHolder','نام صاحب کارت',1,128);
+     if($('#pmBank').value.trim())publicConfig.bank_name=$('#pmBank').value.trim();
+     if($('#pmIban').value.trim())publicConfig.iban=$('#pmIban').value.trim();
+     secret=''
+   }else{
+     if(kind==='nextpay'&&sandbox)throw new Error('حالت Sandbox برای NextPay پشتیبانی نمی‌شود.');
+     if(!secret&&!(kind==='zibal'&&sandbox))throw new Error('Merchant ID یا API Key را وارد کنید.');
+   }
+   const body={slug,kind,display_name:displayName,is_enabled:$('#pmEnabled').checked,sandbox,sort_order:0,public_config:publicConfig,credentials:paymentCredential(kind,secret)};
+   await api('/admin/payment-methods',{method:'POST',body:JSON.stringify(body)});
+   $('#pmSecret').value='';
+   await show('paymentMethods')
+ },'روش پرداخت ذخیره شد.')
 }
-async function togglePaymentMethod(id,enabled){
- const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)return;
- const body={slug:r.slug,kind:r.kind,display_name:r.display_name,is_enabled:enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:r.public_config,credentials:null};
- await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});show('paymentMethods')
+async function togglePaymentMethod(id,enabled,button){
+ if(!confirm(enabled?'این روش پرداخت فعال شود؟':'این روش پرداخت غیرفعال شود؟'))return;
+ await runAction(button,async()=>{
+   const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)throw new Error('روش پرداخت پیدا نشد.');
+   const body={slug:r.slug,kind:r.kind,display_name:r.display_name,is_enabled:enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:r.public_config,credentials:null};
+   await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});
+   await show('paymentMethods')
+ },enabled?'روش پرداخت فعال شد.':'روش پرداخت غیرفعال شد.')
 }
-async function editPaymentMethod(id){
- const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)return;
- const name=prompt('نام نمایشی',r.display_name);if(name===null)return;
- const secret=r.kind==='manual_card'?'':prompt('Merchant ID / API Key جدید (خالی = بدون تغییر)','');
- const publicConfig={...r.public_config};
- if(r.kind==='manual_card'){
-  const card=prompt('شماره کارت',publicConfig.card_number||'');if(card===null)return;
-  const holder=prompt('نام صاحب کارت',publicConfig.card_holder||'');if(holder===null)return;
-  publicConfig.card_number=card;publicConfig.card_holder=holder;
-  publicConfig.bank_name=prompt('نام بانک',publicConfig.bank_name||'')||'';
-  publicConfig.iban=prompt('شبا',publicConfig.iban||'')||'';
- }
- const body={slug:r.slug,kind:r.kind,display_name:name,is_enabled:r.enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:publicConfig,credentials:secret?paymentCredential(r.kind,secret):null};
- await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});show('paymentMethods')
+async function editPaymentMethod(id,button){
+ await runAction(button,async()=>{
+   const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)throw new Error('روش پرداخت پیدا نشد.');
+   const name=prompt('نام نمایشی',r.display_name);if(name===null)return;
+   let secret='';
+   if(r.kind!=='manual_card'){
+     const entered=prompt('Merchant ID / API Key جدید (خالی = بدون تغییر)','');
+     if(entered===null)return;
+     secret=entered.trim()
+   }
+   const publicConfig={...r.public_config};
+   if(r.kind==='manual_card'){
+     const card=prompt('شماره کارت',publicConfig.card_number||'');if(card===null)return;
+     const holder=prompt('نام صاحب کارت',publicConfig.card_holder||'');if(holder===null)return;
+     const bank=prompt('نام بانک',publicConfig.bank_name||'');if(bank===null)return;
+     const iban=prompt('شبا',publicConfig.iban||'');if(iban===null)return;
+     publicConfig.card_number=card;publicConfig.card_holder=holder;
+     publicConfig.bank_name=bank;publicConfig.iban=iban
+   }
+   const body={slug:r.slug,kind:r.kind,display_name:name.trim(),is_enabled:r.enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:publicConfig,credentials:secret?paymentCredential(r.kind,secret):null};
+   await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});
+   await show('paymentMethods');notify('روش پرداخت ویرایش شد.','success')
+ })
 }
-async function createPasarguard(){
- const body={name:$('#pgName').value,base_url:$('#pgUrl').value,api_key_env_var:$('#pgEnv').value||null,bearer_token_env_var:null,reseller_role_name:$('#pgRole').value||null,reseller_role_id:null,weight:Number($('#pgWeight').value||100),is_enabled:$('#pgEnabled').checked};
- await api('/admin/pasarguard/instances',{method:'POST',body:JSON.stringify(body)});show('pasarguardInstances')
+async function createPasarguard(button){
+ await runAction(button,async()=>{
+   const body={
+     name:requiredText('#pgName','نام PasarGuard',2,128),
+     base_url:httpUrl(requiredText('#pgUrl','آدرس PasarGuard',8,2048)),
+     api_key_env_var:requiredText('#pgEnv','نام متغیر محیطی API Key',1,128),
+     bearer_token_env_var:null,
+     reseller_role_name:$('#pgRole').value.trim()||null,
+     reseller_role_id:null,
+     weight:integerInput('#pgWeight','وزن',1,10000),
+     is_enabled:$('#pgEnabled').checked
+   };
+   await api('/admin/pasarguard/instances',{method:'POST',body:JSON.stringify(body)});
+   await show('pasarguardInstances')
+ },'PasarGuard افزوده شد.')
 }
-async function togglePasarguard(id,enabled){
- const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)return;
- const body={name:r.name,base_url:r.base_url,api_key_env_var:r.api_key_env_var,bearer_token_env_var:r.bearer_token_env_var,reseller_role_name:r.reseller_role_name,reseller_role_id:r.reseller_role_id,weight:r.weight,is_enabled:enabled};
- await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});show('pasarguardInstances')
+async function togglePasarguard(id,enabled,button){
+ if(!confirm(enabled?'این PasarGuard فعال شود؟':'این PasarGuard غیرفعال شود؟'))return;
+ await runAction(button,async()=>{
+   const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)throw new Error('PasarGuard پیدا نشد.');
+   const body={name:r.name,base_url:r.base_url,api_key_env_var:r.api_key_env_var,bearer_token_env_var:r.bearer_token_env_var,reseller_role_name:r.reseller_role_name,reseller_role_id:r.reseller_role_id,weight:r.weight,is_enabled:enabled};
+   await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});
+   await show('pasarguardInstances')
+ },enabled?'PasarGuard فعال شد.':'PasarGuard غیرفعال شد.')
 }
-async function editPasarguard(id){
- const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)return;
- const name=prompt('نام',r.name);if(name===null)return;
- const url=prompt('Base URL',r.base_url);if(url===null)return;
- const env=prompt('نام Env برای API Key',r.api_key_env_var||'');if(env===null)return;
- const role=prompt('نام نقش نماینده',r.reseller_role_name||'');if(role===null)return;
- const weightRaw=prompt('وزن',String(r.weight));if(weightRaw===null)return;
- const body={name,base_url:url,api_key_env_var:env||null,bearer_token_env_var:null,reseller_role_name:role||null,reseller_role_id:r.reseller_role_id,weight:Number(weightRaw),is_enabled:r.enabled};
- await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});show('pasarguardInstances')
+async function editPasarguard(id,button){
+ await runAction(button,async()=>{
+   const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)throw new Error('PasarGuard پیدا نشد.');
+   const name=prompt('نام',r.name);if(name===null)return;
+   const url=prompt('Base URL',r.base_url);if(url===null)return;
+   const env=prompt('نام Env برای API Key',r.api_key_env_var||'');if(env===null)return;
+   const role=prompt('نام نقش نماینده',r.reseller_role_name||'');if(role===null)return;
+   const weightRaw=prompt('وزن',String(r.weight));if(weightRaw===null)return;
+   const weight=Number(weightRaw);
+   if(name.trim().length<2)throw new Error('نام PasarGuard باید حداقل ۲ نویسه باشد.');
+   if(!env.trim())throw new Error('نام متغیر محیطی API Key الزامی است.');
+   if(!Number.isInteger(weight)||weight<1||weight>10000)throw new Error('وزن معتبر نیست.');
+   const body={name:name.trim(),base_url:httpUrl(url.trim()),api_key_env_var:env.trim(),bearer_token_env_var:null,reseller_role_name:role.trim()||null,reseller_role_id:r.reseller_role_id,weight,is_enabled:r.enabled};
+   await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});
+   await show('pasarguardInstances');notify('PasarGuard ویرایش شد.','success')
+ })
 }
-async function checkPasarguards(){
- const rows=await api('/admin/pasarguard/instances/health',{method:'POST'});
- const ok=rows.filter(x=>x.healthy).length;
- alert('Health Check: '+ok+' از '+rows.length+' سالم');
- show('pasarguardInstances')
+async function checkPasarguards(button){
+ await runAction(button,async()=>{
+   const rows=await api('/admin/pasarguard/instances/health',{method:'POST'});
+   const ok=rows.filter(x=>x.healthy).length;
+   await show('pasarguardInstances');
+   notify('Health Check: '+ok+' از '+rows.length+' سالم','success')
+ })
 }
-async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
+async function staffStatus(id,active,button){
+ if(!confirm(active?'این مدیر فعال شود؟':'این مدیر غیرفعال شود؟'))return;
+ await runAction(button,async()=>{
+   await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});
+   await show('staff')
+ },active?'مدیر فعال شد.':'مدیر غیرفعال شد.')
+}
 async function restoreSession(){
   const params=new URLSearchParams(location.search);
   if(params.get('login_error')==='1'){
@@ -762,7 +946,14 @@ async function restoreSession(){
     const headers={};
     if(token())headers['Authorization']='Bearer '+token();
     const response=await fetch('/admin/auth/me',{headers});
-    if(!response.ok)return;
+    if(!response.ok){
+      sessionStorage.removeItem('adminToken');
+      sessionStorage.removeItem('adminPermissions');
+      sessionStorage.removeItem('adminRole');
+      $('#app').classList.add('hidden');
+      $('#login').classList.remove('hidden');
+      return
+    }
     const me=await response.json();
     sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));
     sessionStorage.setItem('adminRole',me.role||'');
@@ -771,7 +962,11 @@ async function restoreSession(){
     applyPermissions();
     show('dashboard');
     if(location.search)history.replaceState({},'',location.pathname);
-  }catch{}
+  }catch(error){
+    $('#app').classList.add('hidden');
+    $('#login').classList.remove('hidden');
+    $('#loginError').textContent='برقراری ارتباط با پنل ممکن نشد؛ دوباره تلاش کنید.'
+  }
 }
 const loginForm=$('#loginForm');
 if(loginForm){
