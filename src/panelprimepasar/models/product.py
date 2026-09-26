@@ -36,6 +36,12 @@ class DiscountKind(StrEnum):
     PERCENT = "percent"
 
 
+class DiscountRedemptionStatus(StrEnum):
+    RESERVED = "reserved"
+    REDEEMED = "redeemed"
+    RELEASED = "released"
+
+
 class StaffAdmin(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "staff_admins"
 
@@ -132,6 +138,31 @@ class DiscountCode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+
+class DiscountRedemption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "discount_redemptions"
+
+    discount_code_id: Mapped[UUID] = mapped_column(
+        ForeignKey("discount_codes.id"),
+        index=True,
+    )
+    order_id: Mapped[UUID] = mapped_column(
+        ForeignKey("orders.id"),
+        unique=True,
+        index=True,
+    )
+    customer_id: Mapped[UUID] = mapped_column(
+        ForeignKey("customers.id"),
+        index=True,
+    )
+    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=DiscountRedemptionStatus.RESERVED.value,
+        index=True,
+    )
 
 
 class PasarGuardInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
