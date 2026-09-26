@@ -162,11 +162,11 @@ async def test_permission_error_is_typed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_find_admin_by_username_uses_singular_username_filter() -> None:
+async def test_find_admin_by_username_uses_exact_usernames_filter() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/admins"
-        assert request.url.params["username"] == "target_admin"
-        assert "usernames" not in request.url.params
+        assert request.url.params["usernames"] == "target_admin"
+        assert "username" not in request.url.params
         return httpx.Response(
             200,
             json={
@@ -205,7 +205,7 @@ async def test_ensure_admin_refetches_created_admin_by_username() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(f"{request.method} {request.url.path}")
         if request.method == "GET" and request.url.path == "/api/admins":
-            username = request.url.params.get("username")
+            username = request.url.params.get("usernames")
             if requests.count("GET /api/admins") == 1:
                 return httpx.Response(200, json={"admins": [], "total": 0})
             assert username == "new_reseller"
