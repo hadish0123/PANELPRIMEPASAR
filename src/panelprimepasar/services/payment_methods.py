@@ -281,6 +281,18 @@ async def configure_payment_method(
             raise PaymentMethodStateError(
                 "Online gateway credentials are required"
             )
+        try:
+            existing_credentials = decrypt_payment_secrets(
+                encrypted_credentials,
+                master_key=_master_key(settings),
+            )
+        except PaymentSecretError as exc:
+            raise PaymentMethodStateError(str(exc)) from exc
+        _validate_credentials(
+            kind=values.kind,
+            credentials=existing_credentials,
+            sandbox=values.sandbox,
+        )
     else:
         credentials = _validate_credentials(
             kind=values.kind,
