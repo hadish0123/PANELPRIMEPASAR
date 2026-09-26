@@ -6,6 +6,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer,
 from sqlalchemy.orm import Mapped, mapped_column
 
 from panelprimepasar.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from panelprimepasar.security.permissions import AdminRole
 
 
 class OrderStatus(StrEnum):
@@ -50,6 +51,7 @@ class Plan(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "plans"
 
     name: Mapped[str] = mapped_column(String(128), unique=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     quota_bytes: Mapped[int] = mapped_column(BigInteger)
     price_amount: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(8))
@@ -134,3 +136,16 @@ class AuditEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     entity_id: Mapped[str | None] = mapped_column(String(128), index=True)
     correlation_id: Mapped[str | None] = mapped_column(String(128), index=True)
     metadata_json: Mapped[str | None] = mapped_column(Text)
+
+
+class WebAdmin(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "web_admins"
+
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[AdminRole] = mapped_column(
+        Enum(AdminRole, values_callable=enum_values, native_enum=False, length=32),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

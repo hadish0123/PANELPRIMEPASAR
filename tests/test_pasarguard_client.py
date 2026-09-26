@@ -6,6 +6,7 @@ import pytest
 from panelprimepasar.integrations.pasarguard import (
     PasarGuardClient,
     PasarGuardConfigurationError,
+    PasarGuardError,
     PasarGuardPermissionError,
 )
 
@@ -123,3 +124,32 @@ async def test_permission_error_is_typed() -> None:
         )
         with pytest.raises(PasarGuardPermissionError, match="Permission denied"):
             await client.list_roles_simple()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", ["not-json", '{"unexpected": 1}'])
+async def test_invalid_upstream_response_is_typed(payload: str) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text=payload))
+    async with httpx.AsyncClient(transport=transport, base_url="https://panel.example") as http:
+        client = PasarGuardClient(base_url="https://panel.example", api_key="test", client=http)
+        with pytest.raises(PasarGuardError, match="invalid response"):
+            await client.list_roles_simple()
+
+
+@pytest.mark.asyncio
+async def test_api_key_is_never_forwarded_to_redirect_target() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        return httpx.Response(302, headers={"Location": "https://other.example/steal"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://panel.example",
+        follow_redirects=True,
+    ) as http:
+        client = PasarGuardClient(base_url="https://panel.example", api_key="test", client=http)
+        with pytest.raises(PasarGuardError):
+            await client.list_roles_simple()
+    assert len(calls) == 1

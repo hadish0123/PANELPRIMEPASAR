@@ -1,10 +1,15 @@
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.models import Customer, Order, OrderStatus, Plan
+
+
+class OrderStateError(RuntimeError):
+    """Checkout or cancellation would violate the order state."""
 
 
 async def upsert_customer(
@@ -15,24 +20,20 @@ async def upsert_customer(
     first_name: str | None,
     last_name: str | None,
 ) -> Customer:
-    customer = await session.scalar(
-        select(Customer).where(Customer.telegram_user_id == telegram_user_id)
+    values = dict(
+        telegram_username=telegram_username,
+        first_name=first_name,
+        last_name=last_name,
     )
-
-    if customer is None:
-        customer = Customer(
-            telegram_user_id=telegram_user_id,
-            telegram_username=telegram_username,
-            first_name=first_name,
-            last_name=last_name,
-        )
-        session.add(customer)
-    else:
-        customer.telegram_username = telegram_username
-        customer.first_name = first_name
-        customer.last_name = last_name
-
-    await session.flush()
+    statement = insert(Customer).values(telegram_user_id=telegram_user_id, **values)
+    customer = await session.scalar(
+        statement.on_conflict_do_update(
+            index_elements=[Customer.telegram_user_id],
+            set_=values,
+        ).returning(Customer),
+        execution_options={"populate_existing": True},
+    )
+    assert customer is not None
     return customer
 
 
@@ -70,10 +71,26 @@ async def get_or_create_checkout_order(
     plan: Plan,
     idempotency_key: str,
 ) -> tuple[Order, bool]:
-    existing = await session.scalar(
-        select(Order).where(Order.idempotency_key == idempotency_key)
+    locked_customer = await session.scalar(
+        select(Customer)
+        .where(Customer.id == customer.id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
     )
+    if locked_customer is None or locked_customer.is_blocked:
+        raise OrderStateError("Customer is blocked")
+    locked_plan = await session.scalar(
+        select(Plan)
+        .where(Plan.id == plan.id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    )
+    if locked_plan is None or not locked_plan.is_active:
+        raise OrderStateError("Plan is no longer active")
+    existing = await session.scalar(select(Order).where(Order.idempotency_key == idempotency_key))
     if existing is not None:
+        if existing.customer_id != customer.id or existing.plan_id != plan.id:
+            raise OrderStateError("Checkout key belongs to another purchase")
         return existing, False
 
     order = Order(
@@ -100,6 +117,38 @@ async def get_or_create_checkout_order(
         return existing, False
 
     return order, True
+
+
+async def cancel_order(session: AsyncSession, *, order_id: UUID) -> Order:
+    from panelprimepasar.models import Payment, PaymentStatus
+
+    order = await session.scalar(
+        select(Order)
+        .where(Order.id == order_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if order is None:
+        raise OrderStateError("Order not found")
+    if order.status == OrderStatus.CANCELED:
+        return order
+    if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
+        raise OrderStateError("Only unpaid orders can be canceled")
+    payments = list(
+        (
+            await session.scalars(
+                select(Payment).where(Payment.order_id == order.id).with_for_update()
+            )
+        ).all()
+    )
+    if any(payment.status == PaymentStatus.VERIFIED for payment in payments):
+        raise OrderStateError("A paid order cannot be canceled")
+    for payment in payments:
+        if payment.status == PaymentStatus.PENDING:
+            payment.status = PaymentStatus.FAILED
+    order.status = OrderStatus.CANCELED
+    await session.flush()
+    return order
 
 
 async def list_customer_orders(
