@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     manual_payment_instructions: str | None = None
 
     admin_panel_api_key: SecretStr | None = None
+    admin_panel_owner_username: str | None = None
+    admin_panel_owner_password_hash: SecretStr | None = None
     admin_panel_session_secret: SecretStr | None = None
     admin_panel_session_ttl_seconds: int = 28_800
 
