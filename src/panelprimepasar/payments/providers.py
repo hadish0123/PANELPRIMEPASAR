@@ -128,8 +128,8 @@ class ZarinPalProvider(_HttpPaymentProvider):
             self._api_base = "https://sandbox.zarinpal.com"
             self._payment_base = "https://sandbox.zarinpal.com"
         else:
-            self._api_base = "https://api.zarinpal.com"
-            self._payment_base = "https://www.zarinpal.com"
+            self._api_base = "https://payment.zarinpal.com"
+            self._payment_base = "https://payment.zarinpal.com"
 
     async def create_intent(
         self,
