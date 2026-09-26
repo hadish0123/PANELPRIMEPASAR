@@ -432,7 +432,7 @@ td{color:#394457}
       <div>ورود امن با نشست امضاشده و سطح دسترسی مبتنی بر نقش. اطلاعات حساس در رابط مدیریت نمایش داده نمی‌شوند.</div>
     </div>
   </div>
-  <form class="login-form" method="post" action="/admin/auth/login-form">
+  <form id="loginForm" class="login-form" method="post" action="/admin/auth/login-form">
     <div class="section-eyebrow">Secure Access</div>
     <h1>ورود به پنل مدیریت</h1>
     <p class="lead">برای ورود از حساب مدیریتی خود استفاده کنید.</p>
@@ -538,7 +538,8 @@ async function api(path,opts={}){
   if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   return r.status===204?null:r.json()
 }
-async function login(){
+async function login(event){
+  if(event)event.preventDefault();
   const username=$('#username').value.trim();
   const password=$('#password').value;
   const ownerKey=$('#ownerKey').value;
@@ -763,6 +764,12 @@ async function restoreSession(){
     show('dashboard');
     if(location.search)history.replaceState({},'',location.pathname);
   }catch{}
+}
+const loginForm=$('#loginForm');
+if(loginForm){
+  loginForm.addEventListener('submit',event=>{
+    login(event);
+  });
 }
 restoreSession()
 </script>
