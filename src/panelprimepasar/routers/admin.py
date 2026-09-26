@@ -24,6 +24,8 @@ from panelprimepasar.keyboards.admin import (
 )
 from panelprimepasar.models import Customer, Order, OrderKind, Plan
 from panelprimepasar.routers.customer import format_money, format_quota, order_status_label
+from panelprimepasar.security import Permission
+from panelprimepasar.services.admins import admin_has_permission
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.payments import PaymentStateError, approve_manual_order
 from panelprimepasar.services.plan_inputs import (
@@ -51,8 +53,17 @@ class PlanForm(StatesGroup):
     validity = State()
 
 
-def _is_owner(user_id: int) -> bool:
-    return user_id in get_settings().telegram_owner_ids
+async def _has_permission(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    permission: Permission,
+) -> bool:
+    return await admin_has_permission(
+        session,
+        telegram_user_id=user_id,
+        permission=permission,
+    )
 
 
 async def _reject_message(message: Message) -> None:
@@ -346,9 +357,17 @@ async def _run_order_fulfillment(
 
 
 @router.message(Command("admin"))
-async def admin_command(message: Message, state: FSMContext) -> None:
+async def admin_command(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     user = message.from_user
-    if user is None or not _is_owner(user.id):
+    if user is None or not await _has_permission(
+        session,
+        user_id=user.id,
+        permission=Permission.VIEW_DASHBOARD,
+    ):
         await _reject_message(message)
         return
 
@@ -357,8 +376,16 @@ async def admin_command(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "admin:home")
-async def admin_home(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_owner(callback.from_user.id):
+async def admin_home(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.VIEW_DASHBOARD,
+    ):
         await _reject_callback(callback)
         return
 
@@ -371,8 +398,15 @@ async def admin_home(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "admin:pasarguard_check")
-async def pasarguard_check(callback: CallbackQuery) -> None:
-    if not _is_owner(callback.from_user.id):
+async def pasarguard_check(
+    callback: CallbackQuery,
+    session: AsyncSession,
+) -> None:
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PASARGUARD,
+    ):
         await _reject_callback(callback)
         return
 
@@ -441,8 +475,16 @@ async def pasarguard_check(callback: CallbackQuery) -> None:
 
 
 @router.callback_query(F.data == "admin:create_plan")
-async def create_plan_start(callback: CallbackQuery, state: FSMContext) -> None:
-    if not _is_owner(callback.from_user.id):
+async def create_plan_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -454,9 +496,17 @@ async def create_plan_start(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(PlanForm.name)
-async def create_plan_name(message: Message, state: FSMContext) -> None:
+async def create_plan_name(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     user = message.from_user
-    if user is None or not _is_owner(user.id):
+    if user is None or not await _has_permission(
+        session,
+        user_id=user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_message(message)
         return
 
@@ -476,9 +526,17 @@ async def create_plan_name(message: Message, state: FSMContext) -> None:
 
 
 @router.message(PlanForm.quota)
-async def create_plan_quota(message: Message, state: FSMContext) -> None:
+async def create_plan_quota(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     user = message.from_user
-    if user is None or not _is_owner(user.id):
+    if user is None or not await _has_permission(
+        session,
+        user_id=user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_message(message)
         return
 
@@ -494,9 +552,17 @@ async def create_plan_quota(message: Message, state: FSMContext) -> None:
 
 
 @router.message(PlanForm.price)
-async def create_plan_price(message: Message, state: FSMContext) -> None:
+async def create_plan_price(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
     user = message.from_user
-    if user is None or not _is_owner(user.id):
+    if user is None or not await _has_permission(
+        session,
+        user_id=user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_message(message)
         return
 
@@ -521,7 +587,11 @@ async def create_plan_validity(
     session: AsyncSession,
 ) -> None:
     user = message.from_user
-    if user is None or not _is_owner(user.id):
+    if user is None or not await _has_permission(
+        session,
+        user_id=user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_message(message)
         return
 
@@ -587,7 +657,11 @@ async def create_plan_validity(
 
 @router.callback_query(F.data == "admin:plans")
 async def admin_plans(callback: CallbackQuery, session: AsyncSession) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -617,7 +691,11 @@ async def admin_plans(callback: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data.startswith("admin:toggle_plan:"))
 async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PLANS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -660,7 +738,11 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
 
 @router.callback_query(F.data == "admin:orders")
 async def admin_orders(callback: CallbackQuery, session: AsyncSession) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.VIEW_ORDERS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -693,7 +775,11 @@ async def admin_order_details(
     callback: CallbackQuery,
     session: AsyncSession,
 ) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.VIEW_ORDERS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -722,7 +808,11 @@ async def approve_order(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.APPROVE_PAYMENTS,
+    ):
         await _reject_callback(callback)
         return
 
@@ -776,7 +866,11 @@ async def provision_order(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PASARGUARD,
+    ):
         await _reject_callback(callback)
         return
 
@@ -800,7 +894,11 @@ async def reissue_order_credentials(
     bot: Bot,
     session: AsyncSession,
 ) -> None:
-    if not _is_owner(callback.from_user.id):
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_PASARGUARD,
+    ):
         await _reject_callback(callback)
         return
 
