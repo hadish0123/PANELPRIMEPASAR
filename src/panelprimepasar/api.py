@@ -1,6 +1,6 @@
 import asyncio
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Annotated
@@ -107,8 +107,8 @@ app.include_router(payment_callback_router)
 @app.middleware("http")
 async def admin_session_cookie_auth(
     request: Request,
-    call_next,
-):
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
     if (
         request.url.path.startswith("/admin")
         and request.headers.get("authorization") is None
