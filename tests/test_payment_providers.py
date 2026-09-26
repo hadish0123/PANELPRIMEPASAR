@@ -52,7 +52,7 @@ async def test_zarinpal_request_and_verify_convert_toman_to_rial() -> None:
             description="test order",
         )
         assert intent.reference == "AUTH-1"
-        assert intent.payment_url == "https://www.zarinpal.com/pg/StartPay/AUTH-1"
+        assert intent.payment_url == "https://payment.zarinpal.com/pg/StartPay/AUTH-1"
 
         verified = await provider.verify(
             order_id=order_id,
