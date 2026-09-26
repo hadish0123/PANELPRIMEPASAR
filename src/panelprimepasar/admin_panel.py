@@ -24,6 +24,7 @@ from panelprimepasar.models import (
     StaffAdmin,
     Subscription,
     SupportTicket,
+    Wallet,
 )
 from panelprimepasar.security import (
     ROLE_PERMISSIONS,
@@ -41,6 +42,12 @@ from panelprimepasar.services.admins import (
     upsert_web_staff_admin,
 )
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.wallets import (
+    WalletStateError,
+    credit_wallet,
+    get_or_create_wallet,
+    list_wallet_transactions,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -99,6 +106,13 @@ class StaffCreateRequest(BaseModel):
 
 class StaffPasswordRequest(BaseModel):
     password: str = Field(min_length=12, max_length=512)
+
+
+class WalletCreditRequest(BaseModel):
+    amount: int = Field(gt=0)
+    currency: str = Field(default="IRT", min_length=2, max_length=8)
+    idempotency_key: str = Field(min_length=8, max_length=191)
+    reference: str | None = Field(default=None, max_length=191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,6 +473,109 @@ async def set_customer_blocked(
     return {
         "id": str(customer.id),
         "blocked": customer.is_blocked,
+    }
+
+
+@router.get("/customers/{customer_id}/wallet")
+async def customer_wallet(
+    customer_id: UUID,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_USERS,
+    )
+    customer = await session.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    wallet = await get_or_create_wallet(
+        session,
+        customer_id=customer.id,
+        currency="IRT",
+    )
+    transactions = await list_wallet_transactions(
+        session,
+        wallet_id=wallet.id,
+        limit=20,
+    )
+    return {
+        "id": str(wallet.id),
+        "customer_id": str(customer.id),
+        "balance": wallet.balance,
+        "currency": wallet.currency,
+        "transactions": [
+            {
+                "id": str(transaction.id),
+                "kind": transaction.kind,
+                "amount": transaction.amount,
+                "currency": transaction.currency,
+                "reference": transaction.reference,
+                "created_at": transaction.created_at.isoformat(),
+            }
+            for transaction in transactions
+        ],
+    }
+
+
+@router.post("/customers/{customer_id}/wallet/credit")
+async def credit_customer_wallet(
+    customer_id: UUID,
+    payload: WalletCreditRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_WALLETS,
+    )
+    customer = await session.get(Customer, customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    try:
+        transaction = await credit_wallet(
+            session,
+            customer_id=customer.id,
+            amount=payload.amount,
+            currency=payload.currency,
+            idempotency_key=payload.idempotency_key,
+            reference=payload.reference,
+        )
+        wallet = await session.get(Wallet, transaction.wallet_id)
+        if wallet is None:
+            raise WalletStateError("Wallet not found after credit")
+    except WalletStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="wallet.credited",
+        entity_type="customer",
+        entity_id=str(customer.id),
+        correlation_id=str(transaction.id),
+        metadata={
+            "amount": transaction.amount,
+            "currency": transaction.currency,
+            "reference": transaction.reference,
+        },
+    )
+    await session.commit()
+    return {
+        "wallet_id": str(wallet.id),
+        "transaction_id": str(transaction.id),
+        "balance": wallet.balance,
+        "currency": wallet.currency,
     }
 
 
