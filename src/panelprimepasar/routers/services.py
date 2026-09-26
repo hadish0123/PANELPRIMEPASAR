@@ -24,6 +24,7 @@ from panelprimepasar.models import (
     Subscription,
     SubscriptionStatus,
 )
+from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.orders import list_active_plans
 from panelprimepasar.services.subscriptions import (
     create_lifecycle_order,
@@ -373,13 +374,14 @@ async def lifecycle_plan_selected(
     await callback.answer(
         "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است."
     )
+    payment_methods = await list_enabled_payment_methods(session)
     await callback.message.answer(
         f"سفارش {action_text} ثبت شد.\n"
         f"شماره سفارش: <code>{order.id}</code>\n"
         f"مبلغ: <b>{_format_money(order.price_amount, order.currency)}</b>\n\n"
         f"{payment_text}\n\n"
         "پس از پرداخت، رسید را ارسال کنید.",
-        reply_markup=payment_receipt_keyboard(order.id),
+        reply_markup=payment_receipt_keyboard(order.id, payment_methods),
     )
 
 
