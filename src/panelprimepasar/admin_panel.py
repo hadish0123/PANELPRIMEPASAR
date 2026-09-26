@@ -4,12 +4,14 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from aiogram import Bot
+from aiogram.exceptions import TelegramAPIError
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from panelprimepasar.config import get_settings
+from panelprimepasar.config import Settings, get_settings
 from panelprimepasar.db import get_session
 from panelprimepasar.models import (
     AuditEvent,
@@ -51,6 +53,8 @@ from panelprimepasar.services.discounts import (
     DiscountStateError,
     normalize_discount_code,
 )
+from panelprimepasar.services.fulfillment import FulfillmentOutcome, fulfill_paid_order
+from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
 from panelprimepasar.services.payment_methods import (
     PaymentMethodInput,
@@ -58,6 +62,17 @@ from panelprimepasar.services.payment_methods import (
     configure_payment_method,
     payment_method_public_view,
 )
+from panelprimepasar.services.payments import (
+    PaymentStateError,
+    approve_manual_order,
+    cancel_unpaid_order,
+    reject_pending_manual_payment,
+)
+from panelprimepasar.services.provisioning import (
+    ProvisioningService,
+    ProvisioningStateError,
+)
+from panelprimepasar.services.subscriptions import SubscriptionStateError
 from panelprimepasar.services.wallets import (
     WalletStateError,
     credit_wallet,
@@ -274,6 +289,120 @@ async def _require_web_permission(
     if not has_permission(principal.role, permission):
         raise HTTPException(status_code=403, detail="Permission denied")
     return principal
+
+
+def _web_bot(request: Request) -> Bot | None:
+    runtime = getattr(request.app.state, "telegram_runtime", None)
+    bot = getattr(runtime, "bot", None)
+    return bot if isinstance(bot, Bot) else None
+
+
+async def _notify_order_fulfillment(
+    *,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    customer: Customer,
+    order: Order,
+    outcome: FulfillmentOutcome,
+) -> bool:
+    bot = _web_bot(request)
+    if bot is None:
+        return False
+
+    try:
+        if outcome.order_kind == OrderKind.NEW:
+            if outcome.credentials is None:
+                return False
+            panel_url = await resolve_order_panel_url(
+                session,
+                settings=settings,
+                order_id=order.id,
+            )
+            await bot.send_message(
+                customer.telegram_user_id,
+                "<b>پنل نمایندگی شما آماده است.</b>\n\n"
+                f"آدرس پنل: <code>{panel_url}</code>\n"
+                f"نام کاربری: <code>{outcome.credentials.username}</code>\n"
+                f"رمز عبور: <code>{outcome.credentials.password}</code>\n\n"
+                "رمز را در محل امن نگه‌داری کنید.",
+            )
+        else:
+            action = (
+                "تمدید"
+                if outcome.order_kind == OrderKind.RENEWAL
+                else "افزایش حجم"
+            )
+            await bot.send_message(
+                customer.telegram_user_id,
+                f"✅ {action} سرویس با موفقیت انجام شد.",
+            )
+    except TelegramAPIError:
+        return False
+    return True
+
+
+async def _web_fulfill_order(
+    *,
+    request: Request,
+    session: AsyncSession,
+    settings: Settings,
+    principal: WebAdminPrincipal,
+    order: Order,
+    customer: Customer,
+) -> dict[str, object]:
+    try:
+        outcome = await fulfill_paid_order(
+            session,
+            settings=settings,
+            order_id=order.id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action=(
+                "order.web_fulfillment_succeeded"
+                if outcome.success
+                else "order.web_fulfillment_failed"
+            ),
+            entity_type="order",
+            entity_id=str(order.id),
+            correlation_id=str(order.id),
+            metadata={
+                "order_kind": order.kind.value,
+                "error_code": outcome.error_code,
+            },
+        )
+        await session.commit()
+    except (PasarGuardError, ProvisioningStateError, SubscriptionStateError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    delivered = False
+    if outcome.success:
+        delivered = await _notify_order_fulfillment(
+            request=request,
+            session=session,
+            settings=settings,
+            customer=customer,
+            order=order,
+            outcome=outcome,
+        )
+
+    return {
+        "order_id": str(order.id),
+        "status": order.status.value,
+        "success": outcome.success,
+        "already_provisioned": outcome.already_provisioned,
+        "credentials_delivered": delivered,
+        "error_code": outcome.error_code,
+        "error_message": outcome.error_message,
+    }
 
 
 def _check_admin_key(api_key: str | None) -> None:
@@ -840,6 +969,327 @@ async def orders(
         }
         for row in rows
     ]
+
+
+@router.post("/orders/{order_id}/approve-manual")
+async def approve_manual_order_web(
+    order_id: UUID,
+    request: Request,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.APPROVE_PAYMENTS,
+    )
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    try:
+        payment = await approve_manual_order(
+            session,
+            order_id=order.id,
+            actor_telegram_id=0,
+        )
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action="payment.manual_approved",
+            entity_type="order",
+            entity_id=str(order.id),
+            correlation_id=str(order.id),
+            metadata={"payment_id": str(payment.id)},
+        )
+        await session.commit()
+    except PaymentStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await _web_fulfill_order(
+        request=request,
+        session=session,
+        settings=get_settings(),
+        principal=principal,
+        order=order,
+        customer=customer,
+    )
+
+
+@router.post("/orders/{order_id}/reject-payment")
+async def reject_manual_payment_web(
+    order_id: UUID,
+    request: Request,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.APPROVE_PAYMENTS,
+    )
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    try:
+        payment = await reject_pending_manual_payment(
+            session,
+            order_id=order.id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action="payment.manual_rejected",
+            entity_type="order",
+            entity_id=str(order.id),
+            correlation_id=str(order.id),
+            metadata={"payment_id": str(payment.id)},
+        )
+        await session.commit()
+    except PaymentStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    notified = False
+    bot = _web_bot(request)
+    if bot is not None:
+        try:
+            await bot.send_message(
+                customer.telegram_user_id,
+                "❌ رسید پرداخت شما تأیید نشد. "
+                "می‌توانید رسید صحیح را دوباره ارسال کنید.",
+            )
+            notified = True
+        except TelegramAPIError:
+            pass
+
+    return {
+        "order_id": str(order.id),
+        "status": order.status.value,
+        "payment_id": str(payment.id),
+        "customer_notified": notified,
+    }
+
+
+@router.post("/orders/{order_id}/cancel")
+async def cancel_order_web(
+    order_id: UUID,
+    request: Request,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_ORDERS,
+    )
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    try:
+        order = await cancel_unpaid_order(
+            session,
+            order_id=order.id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action="order.canceled",
+            entity_type="order",
+            entity_id=str(order.id),
+            correlation_id=str(order.id),
+        )
+        await session.commit()
+    except PaymentStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    notified = False
+    bot = _web_bot(request)
+    if bot is not None:
+        try:
+            await bot.send_message(
+                customer.telegram_user_id,
+                f"🗑 سفارش <code>{order.id}</code> توسط مدیریت لغو شد.",
+            )
+            notified = True
+        except TelegramAPIError:
+            pass
+
+    return {
+        "order_id": str(order.id),
+        "status": order.status.value,
+        "customer_notified": notified,
+    }
+
+
+@router.post("/orders/{order_id}/fulfill")
+async def fulfill_order_web(
+    order_id: UUID,
+    request: Request,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    return await _web_fulfill_order(
+        request=request,
+        session=session,
+        settings=get_settings(),
+        principal=principal,
+        order=order,
+        customer=customer,
+    )
+
+
+@router.post("/orders/{order_id}/reissue-credentials")
+async def reissue_order_credentials_web(
+    order_id: UUID,
+    request: Request,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    order = await session.get(Order, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.kind != OrderKind.NEW:
+        raise HTTPException(
+            status_code=400,
+            detail="Only new reseller orders have credentials to reissue",
+        )
+    customer = await session.get(Customer, order.customer_id)
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    account = await session.scalar(
+        select(PasarGuardAccount).where(PasarGuardAccount.order_id == order.id)
+    )
+    if account is None:
+        raise HTTPException(status_code=400, detail="Provisioned account not found")
+
+    settings = get_settings()
+    instance_router = PasarGuardInstanceRouter(settings=settings)
+    try:
+        target = await instance_router.target_for_account(
+            session,
+            account=account,
+        )
+        service = ProvisioningService(
+            client=target.client,
+            reseller_role_id=target.reseller_role_id,
+            reseller_role_name=target.reseller_role_name,
+            pasarguard_instance_id=target.instance_id,
+        )
+        outcome = await service.reissue_credentials(
+            session,
+            order_id=order.id,
+        )
+    except (PasarGuardError, ProvisioningStateError) as exc:
+        await session.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        if "target" in locals():
+            await target.client.close()
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=(
+            str(principal.staff_id)
+            if principal.staff_id is not None
+            else "owner"
+        ),
+        action=(
+            "credentials.web_reissued"
+            if outcome.success
+            else "credentials.web_reissue_failed"
+        ),
+        entity_type="order",
+        entity_id=str(order.id),
+        correlation_id=str(order.id),
+        metadata={"error_code": outcome.error_code},
+    )
+    await session.commit()
+
+    delivered = False
+    bot = _web_bot(request)
+    if outcome.success and outcome.credentials is not None and bot is not None:
+        panel_url = await resolve_order_panel_url(
+            session,
+            settings=settings,
+            order_id=order.id,
+        )
+        try:
+            await bot.send_message(
+                customer.telegram_user_id,
+                "<b>مشخصات ورود جدید پنل نمایندگی</b>\n\n"
+                f"آدرس پنل: <code>{panel_url}</code>\n"
+                f"نام کاربری: <code>{outcome.credentials.username}</code>\n"
+                f"رمز عبور: <code>{outcome.credentials.password}</code>\n\n"
+                "رمز قبلی دیگر معتبر نیست.",
+            )
+            delivered = True
+        except TelegramAPIError:
+            pass
+
+    return {
+        "order_id": str(order.id),
+        "success": outcome.success,
+        "credentials_delivered": delivered,
+        "error_code": outcome.error_code,
+        "error_message": outcome.error_message,
+    }
 
 
 @router.get("/payment-methods")
