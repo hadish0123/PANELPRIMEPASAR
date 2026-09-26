@@ -15,6 +15,7 @@ from panelprimepasar.admin_ui import router as admin_ui_router
 from panelprimepasar.bot import build_bot, build_dispatcher
 from panelprimepasar.config import Settings, get_settings
 from panelprimepasar.db import SessionFactory, engine
+from panelprimepasar.payment_callbacks import router as payment_callback_router
 from panelprimepasar.services.maintenance import subscription_maintenance_loop
 
 
@@ -98,6 +99,7 @@ app = FastAPI(
 
 app.include_router(admin_router)
 app.include_router(admin_ui_router)
+app.include_router(payment_callback_router)
 
 
 @app.get("/health", tags=["system"])
