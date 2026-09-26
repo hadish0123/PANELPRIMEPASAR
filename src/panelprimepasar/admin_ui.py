@@ -171,6 +171,15 @@ const views={
  staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
  audit:async()=>{const rows=await api('/admin/audit?limit=100');$('#view').innerHTML='<h1>Audit Log</h1>'+table(rows,[['زمان',r=>esc(r.created_at)],['Actor',r=>esc(r.actor_type)+' '+esc(r.actor_id)],['عملیات',r=>esc(r.action)],['Entity',r=>esc(r.entity_type)+' '+esc(r.entity_id)]])}
 };
+function orderActionHtml(r){
+ const actions=[];
+ const unpaid=r.status==='pending'||r.status==='awaiting_payment';
+ if(unpaid&&can('approve_payments'))actions.push('پرداخت');
+ if(unpaid&&can('manage_orders'))actions.push('لغو');
+ if((r.status==='paid'||r.status==='provisioning'||r.status==='failed')&&can('manage_pasarguard'))actions.push('اجرا');
+ if(r.status==='completed'&&r.kind==='new'&&can('manage_pasarguard'))actions.push('صدور مجدد');
+ return actions.length?actions.join(' / '):'—'
+}
 async function blockCustomer(id,blocked){await api('/admin/customers/'+id+'/block',{method:'PATCH',body:JSON.stringify({blocked})});show('customers')}
 async function walletCredit(id){
  const wallet=await api('/admin/customers/'+id+'/wallet');
