@@ -14,6 +14,10 @@ from panelprimepasar.models import (
     WalletTransaction,
     WalletTransactionKind,
 )
+from panelprimepasar.services.discounts import (
+    DiscountStateError,
+    redeem_discount_for_order,
+)
 
 
 class WalletStateError(RuntimeError):
@@ -215,6 +219,14 @@ async def pay_order_with_wallet(
         idempotency_key=f"wallet:order:{order.id}",
         reference=str(order.id),
     )
+
+    try:
+        await redeem_discount_for_order(
+            session,
+            order_id=order.id,
+        )
+    except DiscountStateError as exc:
+        raise WalletStateError(str(exc)) from exc
 
     pending_payments = list(
         (
