@@ -4,7 +4,7 @@ from uuid import UUID
 from aiogram.types import InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from panelprimepasar.models import Plan
+from panelprimepasar.models import PaymentMethodConfig, PaymentMethodKind, Plan
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -53,7 +53,10 @@ def plan_actions_keyboard(plan_id: UUID) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def payment_receipt_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
+def payment_receipt_keyboard(
+    order_id: UUID,
+    methods: Sequence[PaymentMethodConfig] = (),
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="💰 پرداخت از کیف پول",
@@ -63,6 +66,21 @@ def payment_receipt_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
         text="🎟 کد تخفیف",
         callback_data=f"discount:{order_id}",
     )
+    for method in methods:
+        prefix = (
+            "pmcard"
+            if method.kind == PaymentMethodKind.MANUAL_CARD.value
+            else "pm"
+        )
+        icon = (
+            "💳"
+            if method.kind == PaymentMethodKind.MANUAL_CARD.value
+            else "🏦"
+        )
+        builder.button(
+            text=f"{icon} {method.display_name}",
+            callback_data=f"{prefix}:{method.slug}:{order_id.hex}",
+        )
     builder.button(
         text="📎 ارسال رسید پرداخت",
         callback_data=f"receipt:{order_id}",
