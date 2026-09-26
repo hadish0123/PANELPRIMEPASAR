@@ -183,6 +183,7 @@ The actual API key/bearer token must be provided as a deployment environment var
 - `docs/architecture.md`
 - `docs/roadmap.md`
 - `docs/pasarguard-contract.md`
+- `docs/operations.md`
 
 
 ## Production release checklist
