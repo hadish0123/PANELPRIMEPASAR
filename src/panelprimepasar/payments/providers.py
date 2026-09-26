@@ -256,8 +256,13 @@ class IDPayProvider(_HttpPaymentProvider):
         reference = _string(payload.get("id"))
         link = _string(payload.get("link"))
         if reference is None or link is None:
+            detail = (
+                payload.get("error_message")
+                or payload.get("error_code")
+                or "unknown error"
+            )
             raise PaymentProviderError(
-                f"IDPay rejected payment request: {payload.get('error_message') or payload.get('error_code') or 'unknown error'}"
+                f"IDPay rejected payment request: {detail}"
             )
         return PaymentIntent(
             provider=self.name,
@@ -348,8 +353,9 @@ class ZibalProvider(_HttpPaymentProvider):
         result = _integer(payload.get("result"))
         track_id = _string(payload.get("trackId"))
         if result != 100 or track_id is None:
+            detail = payload.get("message") or result or "unknown error"
             raise PaymentProviderError(
-                f"Zibal rejected payment request: {payload.get('message') or result or 'unknown error'}"
+                f"Zibal rejected payment request: {detail}"
             )
         return PaymentIntent(
             provider=self.name,
@@ -442,8 +448,9 @@ class NextPayProvider(_HttpPaymentProvider):
         code = _integer(payload.get("code"))
         trans_id = _string(payload.get("trans_id"))
         if code != -1 or trans_id is None:
+            detail = payload.get("message") or code or "unknown error"
             raise PaymentProviderError(
-                f"NextPay rejected payment request: {payload.get('message') or code or 'unknown error'}"
+                f"NextPay rejected payment request: {detail}"
             )
         return PaymentIntent(
             provider=self.name,
