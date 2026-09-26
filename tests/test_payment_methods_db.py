@@ -11,6 +11,7 @@ from panelprimepasar.security.payment_secrets import (
 )
 from panelprimepasar.services.payment_methods import (
     PaymentMethodInput,
+    PaymentMethodStateError,
     configure_payment_method,
     decrypt_method_credentials,
     list_enabled_payment_methods,
@@ -103,4 +104,48 @@ async def test_manual_card_method_does_not_store_secret_credentials() -> None:
         assert isinstance(config, dict)
         assert config["card_number"] == "6037991234567890"
         assert config["card_holder"] == "Test Owner"
+        await session.rollback()
+
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_existing_gateway_credentials_are_revalidated_on_update() -> None:
+    marker = uuid4().hex
+    settings = Settings(
+        payment_callback_base_url="https://payments.example.test",
+        payment_credentials_master_key="master-key-for-payment-tests-123456789",
+    )
+
+    async with SessionFactory() as session:
+        method = await configure_payment_method(
+            session,
+            settings=settings,
+            values=PaymentMethodInput(
+                slug=f"zb{marker[:8]}",
+                kind=PaymentMethodKind.ZIBAL,
+                display_name="زیبال تست",
+                is_enabled=False,
+                sandbox=True,
+                sort_order=0,
+                public_config={},
+                credentials={},
+            ),
+        )
+
+        with pytest.raises(PaymentMethodStateError):
+            await configure_payment_method(
+                session,
+                settings=settings,
+                method_id=method.id,
+                values=PaymentMethodInput(
+                    slug=method.slug,
+                    kind=PaymentMethodKind.ZIBAL,
+                    display_name=method.display_name,
+                    is_enabled=True,
+                    sandbox=False,
+                    sort_order=method.sort_order,
+                    public_config={},
+                    credentials=None,
+                ),
+            )
         await session.rollback()
