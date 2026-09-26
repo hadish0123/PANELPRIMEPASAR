@@ -49,6 +49,11 @@ class ProvisioningClient(Protocol):
         note: str | None = None,
     ) -> PasarGuardAdmin: ...
 
+    async def find_admin_by_username(
+        self,
+        username: str,
+    ) -> PasarGuardAdmin | None: ...
+
     async def modify_admin_by_id(
         self,
         admin_id: int,
@@ -140,6 +145,81 @@ class ProvisioningService:
             session.add(job)
             await session.flush()
         return job
+
+    def _collision_query(
+        self,
+        *,
+        admin_id: int,
+        order_id: UUID,
+    ):
+        query = select(PasarGuardAccount).where(
+            PasarGuardAccount.pasarguard_admin_id == admin_id,
+            PasarGuardAccount.order_id != order_id,
+        )
+        if self.pasarguard_instance_id is None:
+            return query.where(
+                PasarGuardAccount.pasarguard_instance_id.is_(None)
+            )
+        return query.where(
+            PasarGuardAccount.pasarguard_instance_id
+            == self.pasarguard_instance_id
+        )
+
+    async def _repair_admin_id_collision(
+        self,
+        session: AsyncSession,
+        *,
+        collision: PasarGuardAccount,
+        desired_admin: PasarGuardAdmin,
+        desired_username: str,
+        order_id: UUID,
+    ) -> bool:
+        if desired_admin.id is None or desired_admin.username != desired_username:
+            return False
+
+        try:
+            remote_collision = await self.client.find_admin_by_username(
+                collision.username
+            )
+        except PasarGuardError:
+            return False
+
+        if remote_collision is not None and remote_collision.id is not None:
+            if remote_collision.id == desired_admin.id:
+                return False
+
+            secondary_collision = await session.scalar(
+                self._collision_query(
+                    admin_id=remote_collision.id,
+                    order_id=collision.order_id,
+                ).where(PasarGuardAccount.id != collision.id)
+            )
+            if secondary_collision is not None:
+                return False
+
+            collision.pasarguard_admin_id = remote_collision.id
+            collision.is_active = True
+            await session.flush()
+            return True
+
+        collision.pasarguard_admin_id = None
+        collision.is_active = False
+
+        subscriptions = list(
+            (
+                await session.scalars(
+                    select(Subscription).where(
+                        Subscription.pasar_guard_account_id == collision.id,
+                        Subscription.status == SubscriptionStatus.ACTIVE.value,
+                    )
+                )
+            ).all()
+        )
+        for subscription in subscriptions:
+            subscription.status = SubscriptionStatus.SUSPENDED.value
+
+        await session.flush()
+        return True
 
     async def _ensure_subscription(
         self,
@@ -362,33 +442,33 @@ class ProvisioningService:
                 error_message=job.last_error_message,
             )
 
-        collision_query = select(PasarGuardAccount).where(
-            PasarGuardAccount.pasarguard_admin_id == admin.id,
-            PasarGuardAccount.order_id != order.id,
+        collision = await session.scalar(
+            self._collision_query(
+                admin_id=admin.id,
+                order_id=order.id,
+            )
         )
-        if self.pasarguard_instance_id is None:
-            collision_query = collision_query.where(
-                PasarGuardAccount.pasarguard_instance_id.is_(None)
-            )
-        else:
-            collision_query = collision_query.where(
-                PasarGuardAccount.pasarguard_instance_id
-                == self.pasarguard_instance_id
-            )
-        collision = await session.scalar(collision_query)
         if collision is not None:
-            job.status = ProvisioningStatus.FAILED
-            job.last_error_code = "PasarGuardAdminIdCollision"
-            job.last_error_message = (
-                "PasarGuard returned an admin ID already assigned to another order"
+            repaired = await self._repair_admin_id_collision(
+                session,
+                collision=collision,
+                desired_admin=admin,
+                desired_username=username,
+                order_id=order.id,
             )
-            order.status = OrderStatus.FAILED
-            await session.flush()
-            return ProvisioningOutcome(
-                success=False,
-                error_code=job.last_error_code,
-                error_message=job.last_error_message,
-            )
+            if not repaired:
+                job.status = ProvisioningStatus.FAILED
+                job.last_error_code = "PasarGuardAdminIdCollision"
+                job.last_error_message = (
+                    "PasarGuard returned an admin ID already assigned to another order"
+                )
+                order.status = OrderStatus.FAILED
+                await session.flush()
+                return ProvisioningOutcome(
+                    success=False,
+                    error_code=job.last_error_code,
+                    error_message=job.last_error_message,
+                )
 
         account = PasarGuardAccount(
             customer_id=customer.id,
