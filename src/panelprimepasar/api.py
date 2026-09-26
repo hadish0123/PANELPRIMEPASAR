@@ -1,6 +1,7 @@
+import asyncio
 import secrets
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -12,7 +13,8 @@ from pydantic import ValidationError
 from panelprimepasar.admin_panel import router as admin_router
 from panelprimepasar.bot import build_bot, build_dispatcher
 from panelprimepasar.config import Settings, get_settings
-from panelprimepasar.db import engine
+from panelprimepasar.db import SessionFactory, engine
+from panelprimepasar.services.maintenance import subscription_maintenance_loop
 
 
 @dataclass(slots=True)
@@ -38,6 +40,7 @@ def _runtime(app: FastAPI) -> TelegramRuntime | None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     runtime: TelegramRuntime | None = None
+    maintenance_task: asyncio.Task[None] | None = None
 
     if settings.telegram_bot_token is not None:
         webhook_url = _webhook_url(settings)
@@ -63,9 +66,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 allowed_updates=dispatcher.resolve_used_update_types(),
             )
 
+    if settings.subscription_maintenance_enabled:
+        maintenance_task = asyncio.create_task(
+            subscription_maintenance_loop(
+                session_factory=SessionFactory,
+                settings=settings,
+                bot=runtime.bot if runtime is not None else None,
+            ),
+            name="subscription-maintenance",
+        )
+
     try:
         yield
     finally:
+        if maintenance_task is not None:
+            maintenance_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await maintenance_task
         if runtime is not None:
             await runtime.dispatcher.emit_shutdown(bot=runtime.bot)
             await runtime.bot.session.close()
