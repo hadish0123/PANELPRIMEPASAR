@@ -34,6 +34,7 @@ def build_dispatcher(settings: Settings) -> Dispatcher:
     dispatcher.include_router(admin_ops_router)
     dispatcher.include_router(customer_router)
     dispatcher.include_router(services_router)
+    dispatcher.include_router(wallet_router)
     dispatcher.include_router(support_router)
     return dispatcher
 
