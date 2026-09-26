@@ -214,3 +214,77 @@ async def test_provisioning_failure_is_persisted_in_state_machine() -> None:
         assert job.status == ProvisioningStatus.FAILED
         assert job.last_error_code == "PasarGuardError"
         await session.rollback()
+
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_duplicate_remote_admin_id_fails_without_integrity_error() -> None:
+    client = FakeProvisioningClient()
+
+    async with SessionFactory() as session:
+        first_customer, first_plan, first_order = await make_order(
+            status=OrderStatus.COMPLETED
+        )
+        second_customer, second_plan, second_order = await make_order(
+            status=OrderStatus.PAID
+        )
+        session.add_all(
+            [
+                first_customer,
+                first_plan,
+                second_customer,
+                second_plan,
+            ]
+        )
+        await session.flush()
+
+        first_order.customer_id = first_customer.id
+        first_order.plan_id = first_plan.id
+        second_order.customer_id = second_customer.id
+        second_order.plan_id = second_plan.id
+        session.add_all([first_order, second_order])
+        await session.flush()
+
+        session.add(
+            PasarGuardAccount(
+                customer_id=first_customer.id,
+                order_id=first_order.id,
+                pasarguard_instance_id=None,
+                pasarguard_admin_id=101,
+                username="existing-reseller",
+                role_id=7,
+                role_name="نمایندگان",
+                quota_bytes=first_order.quota_bytes,
+                is_active=True,
+            )
+        )
+        await session.flush()
+
+        service = ProvisioningService(
+            client=client,
+            reseller_role_id=7,
+            reseller_role_name=None,
+        )
+        outcome = await service.provision_paid_order(
+            session,
+            order_id=second_order.id,
+        )
+        job = await session.scalar(
+            select(ProvisioningJob).where(
+                ProvisioningJob.order_id == second_order.id
+            )
+        )
+
+        assert outcome.success is False
+        assert outcome.error_code == "PasarGuardAdminIdCollision"
+        assert second_order.status == OrderStatus.FAILED
+        assert job is not None
+        assert job.status == ProvisioningStatus.FAILED
+
+        duplicate = await session.scalar(
+            select(PasarGuardAccount).where(
+                PasarGuardAccount.order_id == second_order.id
+            )
+        )
+        assert duplicate is None
+        await session.rollback()
