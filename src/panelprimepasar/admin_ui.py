@@ -52,6 +52,7 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <button data-perm="view_orders" onclick="show('orders')">🧾 سفارش‌ها</button>
 <button data-perm="view_payments" onclick="show('payments')">💳 پرداخت‌ها</button>
 <button data-perm="manage_payment_methods" onclick="show('paymentMethods')">🏦 روش‌های پرداخت</button>
+<button data-perm="manage_pasarguard" onclick="show('pasarguardInstances')">🛰 پاسارگاردها</button>
 <button data-perm="view_orders" onclick="show('subscriptions')">🔄 سرویس‌ها</button>
 <button data-perm="manage_support" onclick="show('support')">🎧 پشتیبانی</button>
 <button data-perm="manage_admins" onclick="show('staff')">👮 مدیران</button>
@@ -151,6 +152,20 @@ const views={
    '<p class="muted">اطلاعات محرمانه در پاسخ API نمایش داده نمی‌شود و با کلید PAYMENT_CREDENTIALS_MASTER_KEY رمزگذاری می‌شود.</p></div>';
   $('#view').innerHTML='<h1>روش‌های پرداخت</h1>'+form+table(rows,[['نام',r=>esc(r.display_name)],['نوع',r=>esc(r.kind)],['شناسه',r=>'<code>'+esc(r.slug)+'</code>'],['حالت',r=>r.sandbox?'🧪 تست':'واقعی'],['اعتبارنامه',r=>r.kind==='manual_card'?'—':(r.credentials_configured?'✅ تنظیم شده':'❌ ناقص')],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['عملیات',r=>'<button class="btn small" onclick="togglePaymentMethod(\''+r.id+'\','+(!r.enabled)+')">'+(r.enabled?'غیرفعال':'فعال')+'</button><button class="btn small" onclick="editPaymentMethod(\''+r.id+'\')">✏️ ویرایش</button>']])
  },
+ pasarguardInstances:async()=>{
+  const rows=await api('/admin/pasarguard/instances');
+  const form='<div class="card"><h2>افزودن PasarGuard</h2><div class="toolbar">'+
+   '<input id="pgName" placeholder="نام">'+
+   '<input id="pgUrl" placeholder="https://panel.example.com">'+
+   '<input id="pgEnv" placeholder="نام Env برای API Key">'+
+   '<input id="pgRole" placeholder="نام نقش نماینده">'+
+   '<input id="pgWeight" type="number" value="100" placeholder="وزن">'+
+   '<label><input id="pgEnabled" type="checkbox" checked> فعال</label>'+
+   '<button class="btn small" onclick="createPasarguard()">➕ افزودن</button>'+
+   '<button class="btn small" onclick="checkPasarguards()">🩺 Health Check</button></div>'+
+   '<p class="muted">مقدار واقعی API Key در دیتابیس ذخیره نمی‌شود؛ فقط نام متغیر محیطی ثبت می‌شود.</p></div>';
+  $('#view').innerHTML='<h1>PasarGuard Instances</h1>'+form+table(rows,[['نام',r=>esc(r.name)],['آدرس',r=>'<code>'+esc(r.base_url)+'</code>'],['وزن',r=>esc(r.weight)],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['Health',r=>r.last_health_ok===true?'🟢 سالم':(r.last_health_ok===false?'🔴 خطا':'—')],['Env',r=>'<code>'+esc(r.api_key_env_var||r.bearer_token_env_var||'')+'</code>'],['عملیات',r=>'<button class="btn small" onclick="togglePasarguard(\''+r.id+'\','+(!r.enabled)+')">'+(r.enabled?'غیرفعال':'فعال')+'</button><button class="btn small" onclick="editPasarguard(\''+r.id+'\')">✏️ ویرایش</button>']])
+ },
  subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['انقضا',r=>esc(r.expires_at||'∞')],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
  support:async()=>{const rows=await api('/admin/support?limit=100');$('#view').innerHTML='<h1>پشتیبانی</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['موضوع',r=>esc(r.subject)],['وضعیت',r=>esc(r.status)],['به‌روزرسانی',r=>esc(r.updated_at)]])},
  staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
@@ -216,6 +231,31 @@ async function editPaymentMethod(id){
  }
  const body={slug:r.slug,kind:r.kind,display_name:name,is_enabled:r.enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:publicConfig,credentials:secret?paymentCredential(r.kind,secret):null};
  await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});show('paymentMethods')
+}
+async function createPasarguard(){
+ const body={name:$('#pgName').value,base_url:$('#pgUrl').value,api_key_env_var:$('#pgEnv').value||null,bearer_token_env_var:null,reseller_role_name:$('#pgRole').value||null,reseller_role_id:null,weight:Number($('#pgWeight').value||100),is_enabled:$('#pgEnabled').checked};
+ await api('/admin/pasarguard/instances',{method:'POST',body:JSON.stringify(body)});show('pasarguardInstances')
+}
+async function togglePasarguard(id,enabled){
+ const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)return;
+ const body={name:r.name,base_url:r.base_url,api_key_env_var:r.api_key_env_var,bearer_token_env_var:r.bearer_token_env_var,reseller_role_name:r.reseller_role_name,reseller_role_id:r.reseller_role_id,weight:r.weight,is_enabled:enabled};
+ await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});show('pasarguardInstances')
+}
+async function editPasarguard(id){
+ const rows=await api('/admin/pasarguard/instances'),r=rows.find(x=>x.id===id);if(!r)return;
+ const name=prompt('نام',r.name);if(name===null)return;
+ const url=prompt('Base URL',r.base_url);if(url===null)return;
+ const env=prompt('نام Env برای API Key',r.api_key_env_var||'');if(env===null)return;
+ const role=prompt('نام نقش نماینده',r.reseller_role_name||'');if(role===null)return;
+ const weightRaw=prompt('وزن',String(r.weight));if(weightRaw===null)return;
+ const body={name,base_url:url,api_key_env_var:env||null,bearer_token_env_var:null,reseller_role_name:role||null,reseller_role_id:r.reseller_role_id,weight:Number(weightRaw),is_enabled:r.enabled};
+ await api('/admin/pasarguard/instances/'+id,{method:'PATCH',body:JSON.stringify(body)});show('pasarguardInstances')
+}
+async function checkPasarguards(){
+ const rows=await api('/admin/pasarguard/instances/health',{method:'POST'});
+ const ok=rows.filter(x=>x.healthy).length;
+ alert('Health Check: '+ok+' از '+rows.length+' سالم');
+ show('pasarguardInstances')
 }
 async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
 if(token()){api('/admin/auth/me').then(me=>{sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));$('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')}).catch(()=>sessionStorage.clear())}
