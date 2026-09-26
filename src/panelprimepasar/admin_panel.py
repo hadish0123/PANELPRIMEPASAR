@@ -997,7 +997,11 @@ async def approve_manual_order_web(
         payment = await approve_manual_order(
             session,
             order_id=order.id,
-            actor_telegram_id=0,
+            actor_reference=(
+                f"web:{principal.staff_id}"
+                if principal.staff_id is not None
+                else "web:owner"
+            ),
         )
         await record_audit_event(
             session,
