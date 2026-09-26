@@ -49,6 +49,7 @@ from panelprimepasar.services.discounts import (
     DiscountStateError,
     normalize_discount_code,
 )
+from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
 from panelprimepasar.services.wallets import (
     WalletStateError,
     credit_wallet,
