@@ -89,10 +89,16 @@ async def test_verified_payment_transitions_order_to_paid() -> None:
 
 
 class FakeProvisioningClient:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        remote_admins: dict[str, PasarGuardAdmin] | None = None,
+    ) -> None:
         self.fail = fail
         self.ensure_calls = 0
         self.modify_calls = 0
+        self.remote_admins = remote_admins or {}
 
     async def resolve_reseller_role(
         self,
@@ -118,13 +124,21 @@ class FakeProvisioningClient:
         note: str | None = None,
     ) -> PasarGuardAdmin:
         self.ensure_calls += 1
-        return PasarGuardAdmin(
+        admin = PasarGuardAdmin(
             id=101,
             username=username,
             data_limit=data_limit,
             status="active",
             role=PasarGuardRole(id=role_id, name="نمایندگان", is_owner=False),
         )
+        self.remote_admins[username] = admin
+        return admin
+
+    async def find_admin_by_username(
+        self,
+        username: str,
+    ) -> PasarGuardAdmin | None:
+        return self.remote_admins.get(username)
 
     async def modify_admin_by_id(
         self,
@@ -219,7 +233,16 @@ async def test_provisioning_failure_is_persisted_in_state_machine() -> None:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_duplicate_remote_admin_id_fails_without_integrity_error() -> None:
-    client = FakeProvisioningClient()
+    client = FakeProvisioningClient(
+        remote_admins={
+            "existing-reseller": PasarGuardAdmin(
+                id=101,
+                username="existing-reseller",
+                data_limit=1_000_000_000_000,
+                status="active",
+            )
+        }
+    )
 
     async with SessionFactory() as session:
         first_customer, first_plan, first_order = await make_order(
@@ -287,4 +310,145 @@ async def test_duplicate_remote_admin_id_fails_without_integrity_error() -> None
             )
         )
         assert duplicate is None
+        await session.rollback()
+
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_stale_remote_admin_id_is_released_and_new_order_succeeds() -> None:
+    client = FakeProvisioningClient()
+
+    async with SessionFactory() as session:
+        first_customer, first_plan, first_order = await make_order(
+            status=OrderStatus.COMPLETED
+        )
+        second_customer, second_plan, second_order = await make_order(
+            status=OrderStatus.PAID
+        )
+        session.add_all(
+            [
+                first_customer,
+                first_plan,
+                second_customer,
+                second_plan,
+            ]
+        )
+        await session.flush()
+
+        first_order.customer_id = first_customer.id
+        first_order.plan_id = first_plan.id
+        second_order.customer_id = second_customer.id
+        second_order.plan_id = second_plan.id
+        session.add_all([first_order, second_order])
+        await session.flush()
+
+        stale_account = PasarGuardAccount(
+            customer_id=first_customer.id,
+            order_id=first_order.id,
+            pasarguard_instance_id=None,
+            pasarguard_admin_id=101,
+            username="deleted-remote-reseller",
+            role_id=7,
+            role_name="نمایندگان",
+            quota_bytes=first_order.quota_bytes,
+            is_active=True,
+        )
+        session.add(stale_account)
+        await session.flush()
+
+        service = ProvisioningService(
+            client=client,
+            reseller_role_id=7,
+            reseller_role_name=None,
+        )
+        outcome = await service.provision_paid_order(
+            session,
+            order_id=second_order.id,
+        )
+        created = await session.scalar(
+            select(PasarGuardAccount).where(
+                PasarGuardAccount.order_id == second_order.id
+            )
+        )
+
+        assert outcome.success is True
+        assert created is not None
+        assert created.pasarguard_admin_id == 101
+        assert stale_account.pasarguard_admin_id is None
+        assert stale_account.is_active is False
+        assert second_order.status == OrderStatus.COMPLETED
+        await session.rollback()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_stale_local_admin_id_is_repaired_to_current_remote_id() -> None:
+    client = FakeProvisioningClient(
+        remote_admins={
+            "existing-reseller": PasarGuardAdmin(
+                id=202,
+                username="existing-reseller",
+                data_limit=1_000_000_000_000,
+                status="active",
+            )
+        }
+    )
+
+    async with SessionFactory() as session:
+        first_customer, first_plan, first_order = await make_order(
+            status=OrderStatus.COMPLETED
+        )
+        second_customer, second_plan, second_order = await make_order(
+            status=OrderStatus.PAID
+        )
+        session.add_all(
+            [
+                first_customer,
+                first_plan,
+                second_customer,
+                second_plan,
+            ]
+        )
+        await session.flush()
+
+        first_order.customer_id = first_customer.id
+        first_order.plan_id = first_plan.id
+        second_order.customer_id = second_customer.id
+        second_order.plan_id = second_plan.id
+        session.add_all([first_order, second_order])
+        await session.flush()
+
+        stale_account = PasarGuardAccount(
+            customer_id=first_customer.id,
+            order_id=first_order.id,
+            pasarguard_instance_id=None,
+            pasarguard_admin_id=101,
+            username="existing-reseller",
+            role_id=7,
+            role_name="نمایندگان",
+            quota_bytes=first_order.quota_bytes,
+            is_active=True,
+        )
+        session.add(stale_account)
+        await session.flush()
+
+        service = ProvisioningService(
+            client=client,
+            reseller_role_id=7,
+            reseller_role_name=None,
+        )
+        outcome = await service.provision_paid_order(
+            session,
+            order_id=second_order.id,
+        )
+        created = await session.scalar(
+            select(PasarGuardAccount).where(
+                PasarGuardAccount.order_id == second_order.id
+            )
+        )
+
+        assert outcome.success is True
+        assert created is not None
+        assert created.pasarguard_admin_id == 101
+        assert stale_account.pasarguard_admin_id == 202
+        assert stale_account.is_active is True
         await session.rollback()
