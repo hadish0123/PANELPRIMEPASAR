@@ -8,6 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from panelprimepasar.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
+class OrderKind(StrEnum):
+    NEW = "new"
+    RENEWAL = "renewal"
+    TOPUP = "topup"
+
+
 class OrderStatus(StrEnum):
     PENDING = "pending"
     AWAITING_PAYMENT = "awaiting_payment"
@@ -63,6 +69,16 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     customer_id: Mapped[UUID] = mapped_column(ForeignKey("customers.id"), index=True)
     plan_id: Mapped[UUID] = mapped_column(ForeignKey("plans.id"))
+    kind: Mapped[OrderKind] = mapped_column(
+        Enum(OrderKind, values_callable=enum_values, native_enum=False, length=32),
+        nullable=False,
+        default=OrderKind.NEW,
+        index=True,
+    )
+    target_subscription_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("subscriptions.id"),
+        index=True,
+    )
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, values_callable=enum_values, native_enum=False, length=32),
         nullable=False,
