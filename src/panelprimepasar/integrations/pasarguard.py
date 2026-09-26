@@ -1,7 +1,7 @@
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class PasarGuardError(RuntimeError):
@@ -30,6 +30,13 @@ class PasarGuardNotFoundError(PasarGuardError):
 
 class PasarGuardConflictError(PasarGuardError):
     """Raised when PasarGuard reports a resource conflict."""
+
+
+def parse_response[T: BaseModel](model: type[T], response: httpx.Response) -> T:
+    try:
+        return model.model_validate(response.json())
+    except (ValueError, ValidationError) as exc:
+        raise PasarGuardError("PasarGuard returned an invalid response") from exc
 
 
 class PasarGuardRole(BaseModel):
@@ -108,7 +115,7 @@ class PasarGuardClient:
         self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout_seconds,
-            follow_redirects=True,
+            follow_redirects=False,
         )
 
     def _auth_headers(self) -> dict[str, str]:
@@ -147,9 +154,7 @@ class PasarGuardClient:
             raise PasarGuardNotFoundError(detail)
         if response.status_code == 409:
             raise PasarGuardConflictError(detail)
-        raise PasarGuardError(
-            f"PasarGuard returned HTTP {response.status_code}: {detail}"
-        )
+        raise PasarGuardError(f"PasarGuard returned HTTP {response.status_code}: {detail}")
 
     async def _request(
         self,
@@ -168,6 +173,7 @@ class PasarGuardClient:
                 headers=headers,
                 json=json,
                 params=params,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
             raise PasarGuardTransportError("Could not reach PasarGuard") from exc
@@ -184,11 +190,11 @@ class PasarGuardClient:
 
     async def get_current_admin(self) -> PasarGuardAdmin:
         response = await self._request("GET", "/api/admin")
-        return PasarGuardAdmin.model_validate(response.json())
+        return parse_response(PasarGuardAdmin, response)
 
     async def list_roles_simple(self) -> list[PasarGuardRole]:
         response = await self._request("GET", "/api/admin-roles/simple")
-        payload = PasarGuardRolesResponse.model_validate(response.json())
+        payload = parse_response(PasarGuardRolesResponse, response)
         return payload.roles
 
     async def resolve_reseller_role(
@@ -208,8 +214,7 @@ class PasarGuardClient:
         for role in roles:
             id_matches = role_id is None or role.id == role_id
             name_matches = (
-                normalized_name is None
-                or role.name.strip().casefold() == normalized_name
+                normalized_name is None or role.name.strip().casefold() == normalized_name
             )
             if id_matches and name_matches:
                 if role.is_owner:
@@ -218,9 +223,7 @@ class PasarGuardClient:
                     )
                 return role
 
-        raise PasarGuardConfigurationError(
-            "Configured PasarGuard reseller role was not found"
-        )
+        raise PasarGuardConfigurationError("Configured PasarGuard reseller role was not found")
 
     async def find_admin_by_username(self, username: str) -> PasarGuardAdmin | None:
         response = await self._request(
@@ -228,7 +231,7 @@ class PasarGuardClient:
             "/api/admins",
             params={"usernames": username, "limit": "1"},
         )
-        payload = PasarGuardAdminsResponse.model_validate(response.json())
+        payload = parse_response(PasarGuardAdminsResponse, response)
         for admin in payload.admins:
             if admin.username == username:
                 return admin
@@ -255,7 +258,7 @@ class PasarGuardClient:
             "/api/admin",
             json=payload.model_dump(exclude_none=True),
         )
-        return PasarGuardAdmin.model_validate(response.json())
+        return parse_response(PasarGuardAdmin, response)
 
     async def ensure_admin(
         self,
@@ -322,7 +325,7 @@ class PasarGuardClient:
             f"/api/admin/by-id/{admin_id}",
             json=payload.model_dump(exclude_none=True),
         )
-        return PasarGuardAdmin.model_validate(response.json())
+        return parse_response(PasarGuardAdmin, response)
 
     async def close(self) -> None:
         if self._owns_client:

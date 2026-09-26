@@ -17,12 +17,7 @@ _QUOTA_MULTIPLIERS = {
 
 
 def normalize_digits(value: str) -> str:
-    return (
-        value.translate(_DIGIT_TRANSLATION)
-        .replace("٫", ".")
-        .replace("٬", ",")
-        .strip()
-    )
+    return value.translate(_DIGIT_TRANSLATION).replace("٫", ".").replace("٬", ",").strip()
 
 
 def parse_quota(value: str) -> int:
@@ -43,22 +38,19 @@ def parse_quota(value: str) -> int:
     byte_value = amount * _QUOTA_MULTIPLIERS[unit]
     if byte_value != byte_value.to_integral_value():
         raise ValueError("حجم واردشده به تعداد صحیح بایت تبدیل نمی‌شود.")
+    if byte_value > 2**63 - 1:
+        raise ValueError("حجم از محدوده مجاز پایگاه داده بزرگ‌تر است.")
     return int(byte_value)
 
 
 def parse_price_toman(value: str) -> int:
     normalized = normalize_digits(value)
-    compact = (
-        normalized.replace(",", "")
-        .replace("،", "")
-        .replace("_", "")
-        .replace(" ", "")
-    )
+    compact = normalized.replace(",", "").replace("،", "").replace("_", "").replace(" ", "")
     if not compact.isdigit():
         raise ValueError("قیمت را فقط به عدد و بر حسب تومان وارد کنید.")
 
     amount = int(compact)
-    if amount <= 0:
+    if amount <= 0 or amount > 2**63 - 1:
         raise ValueError("قیمت باید بزرگ‌تر از صفر باشد.")
     return amount
 
@@ -72,6 +64,6 @@ def parse_validity_days(value: str) -> int | None:
         raise ValueError("اعتبار را به روز وارد کنید؛ برای بدون محدودیت عدد 0 بفرستید.")
 
     days = int(normalized)
-    if days <= 0:
+    if days <= 0 or days > 36500:
         raise ValueError("اعتبار باید بزرگ‌تر از صفر باشد یا 0 برای بدون محدودیت.")
     return days

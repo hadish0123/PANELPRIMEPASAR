@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +10,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        env_ignore_empty=True,
     )
 
     app_env: str = "development"
@@ -24,6 +25,10 @@ class Settings(BaseSettings):
     manual_payment_instructions: str | None = None
 
     admin_panel_api_key: SecretStr | None = None
+    admin_jwt_secret: SecretStr | None = None
+    admin_token_minutes: int = Field(default=30, ge=5, le=120)
+    admin_login_attempts: int = Field(default=10, ge=1, le=100)
+    admin_login_window_seconds: int = Field(default=300, ge=30, le=3600)
 
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/panelprimepasar"
     redis_url: str = "redis://localhost:6379/0"

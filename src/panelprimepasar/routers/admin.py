@@ -2,7 +2,6 @@ from html import escape
 from uuid import UUID
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -10,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from panelprimepasar.config import Settings, get_settings
+from panelprimepasar.config import get_settings
 from panelprimepasar.integrations.factory import build_pasarguard_client
 from panelprimepasar.integrations.pasarguard import (
     PasarGuardConfigurationError,
@@ -25,6 +24,7 @@ from panelprimepasar.keyboards.admin import (
 from panelprimepasar.models import Customer, Order, Plan
 from panelprimepasar.routers.customer import format_money, format_quota, order_status_label
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.delivery import deliver_credentials
 from panelprimepasar.services.payments import PaymentStateError, approve_manual_order
 from panelprimepasar.services.plan_inputs import (
     parse_price_toman,
@@ -32,7 +32,6 @@ from panelprimepasar.services.plan_inputs import (
     parse_validity_days,
 )
 from panelprimepasar.services.provisioning import (
-    ProvisioningOutcome,
     ProvisioningService,
     ProvisioningStateError,
 )
@@ -76,9 +75,7 @@ async def _get_order_customer(
     if order is None:
         return None
 
-    customer = await session.scalar(
-        select(Customer).where(Customer.id == order.customer_id)
-    )
+    customer = await session.scalar(select(Customer).where(Customer.id == order.customer_id))
     if customer is None:
         return None
     return order, customer
@@ -86,9 +83,7 @@ async def _get_order_customer(
 
 def _order_details_text(order: Order, customer: Customer) -> str:
     username = (
-        f"@{escape(customer.telegram_username)}"
-        if customer.telegram_username
-        else "بدون username"
+        f"@{escape(customer.telegram_username)}" if customer.telegram_username else "بدون username"
     )
     return (
         f"<b>سفارش {str(order.id)[:8]}</b>\n\n"
@@ -99,32 +94,6 @@ def _order_details_text(order: Order, customer: Customer) -> str:
         f"مبلغ: <b>{format_money(order.price_amount, order.currency)}</b>\n"
         f"وضعیت: <b>{order_status_label(order.status)}</b>"
     )
-
-
-async def _deliver_credentials(
-    *,
-    bot: Bot,
-    settings: Settings,
-    customer: Customer,
-    outcome: ProvisioningOutcome,
-) -> bool:
-    credentials = outcome.credentials
-    if credentials is None:
-        return False
-
-    panel_url = str(settings.pasarguard_base_url).rstrip("/")
-    text = (
-        "<b>پنل نمایندگی شما آماده است.</b>\n\n"
-        f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
-        f"نام کاربری: <code>{escape(credentials.username)}</code>\n"
-        f"رمز عبور: <code>{escape(credentials.password)}</code>\n\n"
-        "رمز را در محل امن نگه‌داری کنید."
-    )
-    try:
-        await bot.send_message(customer.telegram_user_id, text)
-    except TelegramAPIError:
-        return False
-    return True
 
 
 async def _run_provisioning(
@@ -149,8 +118,7 @@ async def _run_provisioning(
         client = build_pasarguard_client(settings)
     except PasarGuardConfigurationError as exc:
         await callback.message.answer(
-            "اتصال PasarGuard هنوز تنظیم نشده است.\n"
-            f"<code>{escape(str(exc))}</code>"
+            f"اتصال PasarGuard هنوز تنظیم نشده است.\n<code>{escape(str(exc))}</code>"
         )
         return
 
@@ -173,10 +141,7 @@ async def _run_provisioning(
             )
     except (ProvisioningStateError, PasarGuardError) as exc:
         await session.rollback()
-        await callback.message.answer(
-            "عملیات ساخت پنل اجرا نشد.\n"
-            f"<code>{escape(str(exc))}</code>"
-        )
+        await callback.message.answer(f"عملیات ساخت پنل اجرا نشد.\n<code>{escape(str(exc))}</code>")
         return
     finally:
         await client.close()
@@ -215,7 +180,7 @@ async def _run_provisioning(
         )
         return
 
-    delivered = await _deliver_credentials(
+    delivered = await deliver_credentials(
         bot=bot,
         settings=settings,
         customer=customer,
@@ -225,11 +190,7 @@ async def _run_provisioning(
         session,
         actor_type="system",
         actor_id=None,
-        action=(
-            "credentials.delivery_succeeded"
-            if delivered
-            else "credentials.delivery_failed"
-        ),
+        action=("credentials.delivery_succeeded" if delivered else "credentials.delivery_failed"),
         entity_type="order",
         entity_id=str(order_id),
         correlation_id=str(order_id),
@@ -238,9 +199,7 @@ async def _run_provisioning(
     await session.commit()
 
     if delivered:
-        await callback.message.answer(
-            "پنل ساخته شد و مشخصات برای مشتری در Telegram ارسال شد."
-        )
+        await callback.message.answer("پنل ساخته شد و مشخصات برای مشتری در Telegram ارسال شد.")
     else:
         await callback.message.answer(
             "پنل ساخته شد، اما ارسال مشخصات به Telegram مشتری ناموفق بود. "
@@ -271,8 +230,6 @@ async def admin_home(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.answer("مدیریت فروش پنل", reply_markup=admin_menu())
 
 
-
-
 @router.callback_query(F.data == "admin:pasarguard_check")
 async def pasarguard_check(callback: CallbackQuery) -> None:
     if not _is_owner(callback.from_user.id):
@@ -288,8 +245,7 @@ async def pasarguard_check(callback: CallbackQuery) -> None:
         client = build_pasarguard_client(settings)
     except PasarGuardConfigurationError as exc:
         await callback.message.answer(
-            "اتصال PasarGuard تنظیم نشده است.\n"
-            f"<code>{escape(str(exc))}</code>",
+            f"اتصال PasarGuard تنظیم نشده است.\n<code>{escape(str(exc))}</code>",
             reply_markup=admin_menu(),
         )
         return
@@ -319,9 +275,7 @@ async def pasarguard_check(callback: CallbackQuery) -> None:
             for role in roles
         ]
         current_role = (
-            escape(current_admin.role.name)
-            if current_admin.role is not None
-            else "نامشخص"
+            escape(current_admin.role.name) if current_admin.role is not None else "نامشخص"
         )
         text = (
             "<b>PasarGuard diagnostics</b>\n\n"
@@ -335,8 +289,7 @@ async def pasarguard_check(callback: CallbackQuery) -> None:
         await callback.message.answer(text, reply_markup=admin_menu())
     except PasarGuardError as exc:
         await callback.message.answer(
-            "بررسی PasarGuard ناموفق بود.\n"
-            f"<code>{escape(str(exc))}</code>",
+            f"بررسی PasarGuard ناموفق بود.\n<code>{escape(str(exc))}</code>",
             reply_markup=admin_menu(),
         )
     finally:
@@ -371,10 +324,7 @@ async def create_plan_name(message: Message, state: FSMContext) -> None:
     await state.update_data(name=name)
     await state.set_state(PlanForm.quota)
     await message.answer(
-        "حجم را با واحد وارد کنید. مثال:\n"
-        "<code>500GB</code>\n"
-        "<code>1TB</code>\n"
-        "<code>1TiB</code>"
+        "حجم را با واحد وارد کنید. مثال:\n<code>500GB</code>\n<code>1TB</code>\n<code>1TiB</code>"
     )
 
 
@@ -412,8 +362,7 @@ async def create_plan_price(message: Message, state: FSMContext) -> None:
     await state.update_data(price_amount=price_amount)
     await state.set_state(PlanForm.validity)
     await message.answer(
-        "اعتبار پلن را به روز وارد کنید. "
-        "برای بدون محدودیت زمانی عدد <code>0</code> بفرستید."
+        "اعتبار پلن را به روز وارد کنید. برای بدون محدودیت زمانی عدد <code>0</code> بفرستید."
     )
 
 
@@ -473,11 +422,7 @@ async def create_plan_validity(
     )
     await state.clear()
 
-    validity_text = (
-        f"{validity_days} روز"
-        if validity_days is not None
-        else "بدون محدودیت"
-    )
+    validity_text = f"{validity_days} روز" if validity_days is not None else "بدون محدودیت"
     await message.answer(
         "پلن ساخته شد.\n\n"
         f"نام: <b>{escape(plan.name)}</b>\n"
@@ -556,9 +501,7 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
         ).all()
     )
     if isinstance(callback.message, Message):
-        await callback.message.edit_reply_markup(
-            reply_markup=admin_plans_keyboard(plans)
-        )
+        await callback.message.edit_reply_markup(reply_markup=admin_plans_keyboard(plans))
 
 
 @router.callback_query(F.data == "admin:orders")
@@ -569,11 +512,7 @@ async def admin_orders(callback: CallbackQuery, session: AsyncSession) -> None:
 
     await callback.answer()
     orders = list(
-        (
-            await session.scalars(
-                select(Order).order_by(Order.created_at.desc()).limit(20)
-            )
-        ).all()
+        (await session.scalars(select(Order).order_by(Order.created_at.desc()).limit(20))).all()
     )
     if not isinstance(callback.message, Message):
         return
@@ -660,9 +599,7 @@ async def approve_order(
     except PaymentStateError as exc:
         await session.rollback()
         if isinstance(callback.message, Message):
-            await callback.message.answer(
-                f"پرداخت تأیید نشد: <code>{escape(str(exc))}</code>"
-            )
+            await callback.message.answer(f"پرداخت تأیید نشد: <code>{escape(str(exc))}</code>")
         return
 
     await _run_provisioning(

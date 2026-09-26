@@ -10,7 +10,9 @@ COPY pyproject.toml README.md alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
 
-RUN pip install .
+RUN pip install . && useradd --system --uid 10001 --create-home app
+
+USER app
 
 EXPOSE 8080
 

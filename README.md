@@ -2,7 +2,7 @@
 
 Telegram sales, payment-review, and PasarGuard reseller/admin provisioning service.
 
-## Current MVP
+## Current capabilities
 
 Implemented flow:
 
@@ -16,6 +16,12 @@ Implemented flow:
 8. The bot creates or reconciles the PasarGuard Admin account with the purchased `data_limit`.
 9. Credentials are delivered to the customer.
 10. Plaintext passwords are not stored. If delivery fails, the owner can rotate and reissue credentials.
+
+Web administration is available at `/admin/ui` with a Persian RTL interface, individual
+administrator accounts, JWT authentication, Argon2 password hashing, role checks,
+Redis login limits and an audit trail. It supports plan CRUD, customer lookup/blocking,
+order review/cancellation, manual payment approval/rejection, receipt download,
+provisioning/reissue, administrator management and currency-aware sales metrics.
 
 No automatic external payment gateway is selected yet. The payment layer is provider-neutral,
 and manual receipt approval is the working MVP provider path.
@@ -40,6 +46,9 @@ Those repositories must not be modified by this project.
 - Docker
 - Railway
 - GitHub Actions
+
+See [Installation and operations](docs/installation.md) for deployment, administrator
+bootstrap, environment variables, backup and restore, and current product limitations.
 
 ## Required production configuration
 
@@ -138,7 +147,7 @@ The admin UI supports:
 - credential rotation/reissue
 - read-only PasarGuard diagnostics
 
-The read-only admin API accepts `X-Admin-Key`. `GET /admin/customers` supports
+The admin API accepts a JWT bearer token or the legacy owner `X-Admin-Key`. `GET /admin/customers` supports
 `search` (Telegram username or exact numeric Telegram ID), `blocked`, `offset`,
 and `limit`. `GET /admin/orders` supports `status`, `offset`, and `limit`.
 Both endpoints keep their existing list response format; pagination defaults to
@@ -149,3 +158,11 @@ Both endpoints keep their existing list response format; pagination defaults to
 - `docs/architecture.md`
 - `docs/roadmap.md`
 - `docs/pasarguard-contract.md`
+- `docs/installation.md`
+- `docs/repository-audit.md`
+
+## Verification
+
+GitHub Actions runs Python 3.13, Ruff, mypy, PostgreSQL/Redis integration tests,
+Alembic upgrade/downgrade/upgrade, browser E2E and the production Docker build.
+The broader SaaS roadmap is still in progress; see the explicit gaps in the installation guide.

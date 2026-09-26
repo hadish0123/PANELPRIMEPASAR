@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PANELPRIMEPASAR — مدیریت</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+  <script src="/admin/assets/admin.js" defer></script>
+</head>
+<body>
+<header><div><strong>PANELPRIMEPASAR</strong><span>مدیریت فروش و نمایندگی</span></div>
+  <div id="identity"></div><button id="logout" hidden>خروج</button></header>
+<main>
+  <section id="login-card" class="card login">
+    <p class="eyebrow">پنل مدیریت</p><h1>ورود به حساب مدیر</h1>
+    <p>با نام کاربری و رمز حساب مدیریت وارد شوید.</p>
+    <form id="login-form">
+      <label>نام کاربری<input name="username" autocomplete="username" dir="ltr" required maxlength="64"></label>
+      <label>رمز عبور<input name="password" type="password" autocomplete="current-password" dir="ltr" required maxlength="128"></label>
+      <button class="primary" type="submit">ورود</button>
+    </form>
+  </section>
+  <section id="workspace" hidden>
+    <nav id="navigation" aria-label="بخش‌های مدیریت"></nav>
+    <div class="title-row"><div><p class="eyebrow">فضای مدیریت</p><h1 id="page-title"></h1></div>
+      <button id="refresh">به‌روزرسانی</button></div>
+    <div id="toolbar"></div><div id="content" aria-live="polite"></div>
+    <div id="pagination"></div>
+  </section>
+  <p id="notice" role="status" hidden></p>
+</main>
+<dialog id="dialog"><div class="title-row"><h2 id="dialog-title"></h2>
+  <button id="close-dialog" aria-label="بستن">بستن</button></div><div id="dialog-content"></div></dialog>
+<footer>گزارش‌های مالی بر اساس زمان تهران نمایش داده می‌شوند.</footer>
+</body></html>

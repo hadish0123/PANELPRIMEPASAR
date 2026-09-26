@@ -10,6 +10,7 @@ from panelprimepasar.models.domain import (
     Plan,
     ProvisioningJob,
     ProvisioningStatus,
+    WebAdmin,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "Plan",
     "ProvisioningJob",
     "ProvisioningStatus",
+    "WebAdmin",
 ]

@@ -12,6 +12,8 @@ class AdminRole(StrEnum):
 class Permission(StrEnum):
     VIEW_DASHBOARD = "view_dashboard"
     MANAGE_USERS = "manage_users"
+    VIEW_USERS = "view_users"
+    BLOCK_USERS = "block_users"
     MANAGE_PLANS = "manage_plans"
     VIEW_ORDERS = "view_orders"
     MANAGE_ORDERS = "manage_orders"
@@ -27,6 +29,8 @@ ROLE_PERMISSIONS: dict[AdminRole, frozenset[Permission]] = {
         {
             Permission.VIEW_DASHBOARD,
             Permission.MANAGE_USERS,
+            Permission.VIEW_USERS,
+            Permission.BLOCK_USERS,
             Permission.MANAGE_PLANS,
             Permission.VIEW_ORDERS,
             Permission.MANAGE_ORDERS,
@@ -41,6 +45,7 @@ ROLE_PERMISSIONS: dict[AdminRole, frozenset[Permission]] = {
             Permission.VIEW_ORDERS,
             Permission.MANAGE_ORDERS,
             Permission.MANAGE_USERS,
+            Permission.VIEW_USERS,
         }
     ),
     AdminRole.FINANCE: frozenset(
@@ -55,6 +60,7 @@ ROLE_PERMISSIONS: dict[AdminRole, frozenset[Permission]] = {
         {
             Permission.VIEW_DASHBOARD,
             Permission.MANAGE_USERS,
+            Permission.VIEW_USERS,
             Permission.VIEW_ORDERS,
         }
     ),

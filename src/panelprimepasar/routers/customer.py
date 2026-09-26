@@ -21,6 +21,7 @@ from panelprimepasar.keyboards.customer import (
 from panelprimepasar.models import Customer, Order, OrderStatus
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.orders import (
+    OrderStateError,
     checkout_idempotency_key,
     get_active_plan,
     get_or_create_checkout_order,
@@ -212,24 +213,25 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
         message_id=callback.message.message_id,
         plan_id=plan.id,
     )
-    order, created = await get_or_create_checkout_order(
-        session,
-        customer=customer,
-        plan=plan,
-        idempotency_key=key,
-    )
+    try:
+        order, created = await get_or_create_checkout_order(
+            session,
+            customer=customer,
+            plan=plan,
+            idempotency_key=key,
+        )
+    except OrderStateError:
+        await callback.answer("خرید برای این حساب یا پلن فعال نیست.", show_alert=True)
+        return
 
-    await callback.answer(
-        "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است."
-    )
+    await callback.answer("سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است.")
 
     instructions = get_settings().manual_payment_instructions
     if instructions:
         payment_text = escape(instructions)
     else:
         payment_text = (
-            "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است؛ "
-            "قبل از پرداخت با مدیریت هماهنگ کنید."
+            "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است؛ قبل از پرداخت با مدیریت هماهنگ کنید."
         )
 
     await callback.message.answer(
@@ -277,9 +279,7 @@ async def receipt_start(
     await state.set_state(ReceiptForm.waiting_receipt)
     await callback.answer()
     if isinstance(callback.message, Message):
-        await callback.message.answer(
-            "تصویر رسید یا فایل رسید پرداخت را همین‌جا ارسال کنید."
-        )
+        await callback.message.answer("تصویر رسید یا فایل رسید پرداخت را همین‌جا ارسال کنید.")
 
 
 @router.message(ReceiptForm.waiting_receipt, F.photo | F.document)
@@ -314,9 +314,7 @@ async def receipt_received(
     customer, order = order_customer
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
         await state.clear()
-        await message.answer(
-            f"این سفارش اکنون «{order_status_label(order.status)}» است."
-        )
+        await message.answer(f"این سفارش اکنون «{order_status_label(order.status)}» است.")
         return
 
     if message.photo:
@@ -387,8 +385,7 @@ async def receipt_received(
             continue
 
     await message.answer(
-        "رسید ثبت شد و برای بررسی مدیریت ارسال شد. "
-        "پس از تأیید، وضعیت سفارش به‌روزرسانی می‌شود."
+        "رسید ثبت شد و برای بررسی مدیریت ارسال شد. پس از تأیید، وضعیت سفارش به‌روزرسانی می‌شود."
     )
 
 
