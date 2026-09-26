@@ -5,9 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.config import Settings
-from panelprimepasar.integrations.factory import build_pasarguard_client
 from panelprimepasar.integrations.pasarguard import PasarGuardError
-from panelprimepasar.models import Order, OrderKind
+from panelprimepasar.models import (
+    Order,
+    OrderKind,
+    PasarGuardAccount,
+    Subscription,
+)
+from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
 from panelprimepasar.services.provisioning import (
     ProvisionedCredentials,
     ProvisioningService,
@@ -35,19 +40,58 @@ async def fulfill_paid_order(
     settings: Settings,
     order_id: UUID,
 ) -> FulfillmentOutcome:
-    order = await session.scalar(
-        select(Order).where(Order.id == order_id)
-    )
+    order = await session.scalar(select(Order).where(Order.id == order_id))
     if order is None:
         raise ProvisioningStateError("Order not found")
 
-    client = build_pasarguard_client(settings)
+    instance_router = PasarGuardInstanceRouter(settings=settings)
+
+    if order.kind == OrderKind.NEW:
+        account = await session.scalar(
+            select(PasarGuardAccount).where(
+                PasarGuardAccount.order_id == order.id
+            )
+        )
+        target = (
+            await instance_router.target_for_account(
+                session,
+                account=account,
+            )
+            if account is not None
+            else await instance_router.select_for_new_order(
+                session,
+                routing_key=str(order.id),
+            )
+        )
+    else:
+        if order.target_subscription_id is None:
+            raise SubscriptionStateError(
+                "Lifecycle order has no target subscription"
+            )
+        subscription = await session.get(
+            Subscription,
+            order.target_subscription_id,
+        )
+        if subscription is None:
+            raise SubscriptionStateError("Subscription not found")
+        account = await session.get(
+            PasarGuardAccount,
+            subscription.pasar_guard_account_id,
+        )
+        if account is None:
+            raise SubscriptionStateError("PasarGuard account not found")
+        target = await instance_router.target_for_account(
+            session,
+            account=account,
+        )
+
     try:
         if order.kind == OrderKind.NEW:
             service = ProvisioningService(
-                client=client,
-                reseller_role_id=settings.pasarguard_reseller_role_id,
-                reseller_role_name=settings.pasarguard_reseller_role_name,
+                client=target.client,
+                reseller_role_id=target.reseller_role_id,
+                reseller_role_name=target.reseller_role_name,
+                pasarguard_instance_id=target.instance_id,
             )
             result = await service.provision_paid_order(
                 session,
@@ -65,7 +109,7 @@ async def fulfill_paid_order(
         lifecycle = await apply_paid_lifecycle_order(
             session,
             order_id=order.id,
-            client=client,
+            client=target.client,
         )
         return FulfillmentOutcome(
             success=lifecycle.success,
@@ -76,4 +120,4 @@ async def fulfill_paid_order(
     except (PasarGuardError, SubscriptionStateError, ProvisioningStateError):
         raise
     finally:
-        await client.close()
+        await target.client.close()
