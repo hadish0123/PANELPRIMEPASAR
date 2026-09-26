@@ -176,19 +176,27 @@ async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.callback_query(F.data.startswith("checkout:"))
 async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> None:
     if not isinstance(callback.message, Message):
-        await callback.answer()
+        try:
+            await callback.answer()
+        except TelegramAPIError:
+            pass
         return
+
+    try:
+        await callback.answer("در حال ثبت سفارش...")
+    except TelegramAPIError:
+        pass
 
     data = callback.data or ""
     try:
         plan_id = UUID(data.removeprefix("checkout:"))
     except ValueError:
-        await callback.answer("شناسه پلن معتبر نیست.", show_alert=True)
+        await callback.message.answer("شناسه پلن معتبر نیست.")
         return
 
     plan = await get_active_plan(session, plan_id)
     if plan is None:
-        await callback.answer("این پلن دیگر فعال نیست.", show_alert=True)
+        await callback.message.answer("این پلن دیگر فعال نیست.")
         return
 
     user = callback.from_user
@@ -209,10 +217,6 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
         customer=customer,
         plan=plan,
         idempotency_key=key,
-    )
-
-    await callback.answer(
-        "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است."
     )
 
     instructions = get_settings().manual_payment_instructions
