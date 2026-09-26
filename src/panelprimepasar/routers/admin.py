@@ -22,7 +22,7 @@ from panelprimepasar.keyboards.admin import (
     admin_orders_keyboard,
     admin_plans_keyboard,
 )
-from panelprimepasar.models import Customer, Order, Plan
+from panelprimepasar.models import Customer, Order, OrderKind, Plan
 from panelprimepasar.routers.customer import format_money, format_quota, order_status_label
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.payments import PaymentStateError, approve_manual_order
@@ -35,6 +35,10 @@ from panelprimepasar.services.provisioning import (
     ProvisioningOutcome,
     ProvisioningService,
     ProvisioningStateError,
+)
+from panelprimepasar.services.subscriptions import (
+    SubscriptionStateError,
+    apply_paid_lifecycle_order,
 )
 
 router = Router(name="admin")
@@ -246,6 +250,99 @@ async def _run_provisioning(
             "پنل ساخته شد، اما ارسال مشخصات به Telegram مشتری ناموفق بود. "
             "از «صدور مجدد رمز و ارسال» استفاده کنید."
         )
+
+
+async def _run_order_fulfillment(
+    *,
+    callback: CallbackQuery,
+    bot: Bot,
+    session: AsyncSession,
+    order_id: UUID,
+) -> None:
+    order_customer = await _get_order_customer(session, order_id)
+    if order_customer is None:
+        if isinstance(callback.message, Message):
+            await callback.message.answer("سفارش یا مشتری پیدا نشد.")
+        return
+
+    order, customer = order_customer
+    if order.kind == OrderKind.NEW:
+        await _run_provisioning(
+            callback=callback,
+            bot=bot,
+            session=session,
+            order_id=order_id,
+            reissue=False,
+        )
+        return
+
+    if not isinstance(callback.message, Message):
+        return
+
+    settings = get_settings()
+    try:
+        client = build_pasarguard_client(settings)
+    except PasarGuardConfigurationError as exc:
+        await callback.message.answer(
+            "اتصال PasarGuard هنوز تنظیم نشده است.\n"
+            f"<code>{escape(str(exc))}</code>"
+        )
+        return
+
+    try:
+        outcome = await apply_paid_lifecycle_order(
+            session,
+            order_id=order_id,
+            client=client,
+        )
+        await record_audit_event(
+            session,
+            actor_type="telegram_owner",
+            actor_id=str(callback.from_user.id),
+            action=(
+                "subscription.lifecycle_succeeded"
+                if outcome.success
+                else "subscription.lifecycle_failed"
+            ),
+            entity_type="order",
+            entity_id=str(order_id),
+            correlation_id=str(order_id),
+            metadata={
+                "order_kind": order.kind.value,
+                "subscription_id": str(outcome.subscription_id),
+                "error_code": outcome.error_code,
+            },
+        )
+        await session.commit()
+    except (SubscriptionStateError, PasarGuardError) as exc:
+        await session.rollback()
+        await callback.message.answer(
+            "عملیات سرویس اجرا نشد.\n"
+            f"<code>{escape(str(exc))}</code>"
+        )
+        return
+    finally:
+        await client.close()
+
+    if not outcome.success:
+        await callback.message.answer(
+            "عملیات سرویس ناموفق بود و امکان تلاش مجدد وجود دارد.\n"
+            f"<code>{escape(outcome.error_message or outcome.error_code or 'unknown')}</code>"
+        )
+        return
+
+    action_text = "تمدید" if order.kind == OrderKind.RENEWAL else "افزایش حجم"
+    try:
+        await bot.send_message(
+            customer.telegram_user_id,
+            f"✅ {action_text} سرویس با موفقیت انجام شد.",
+        )
+    except TelegramAPIError:
+        pass
+
+    await callback.message.answer(
+        f"{action_text} سرویس با موفقیت اعمال شد."
+    )
 
 
 @router.message(Command("admin"))
@@ -665,12 +762,11 @@ async def approve_order(
             )
         return
 
-    await _run_provisioning(
+    await _run_order_fulfillment(
         callback=callback,
         bot=bot,
         session=session,
         order_id=order_id,
-        reissue=False,
     )
 
 
@@ -689,13 +785,12 @@ async def provision_order(
         await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
-    await callback.answer("در حال ساخت پنل...")
-    await _run_provisioning(
+    await callback.answer("در حال اجرای عملیات سفارش...")
+    await _run_order_fulfillment(
         callback=callback,
         bot=bot,
         session=session,
         order_id=order_id,
-        reissue=False,
     )
 
 
