@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from panelprimepasar.config import get_settings
 from panelprimepasar.keyboards.admin import admin_order_notification_keyboard
 from panelprimepasar.keyboards.customer import (
-    main_menu,
     lifecycle_plans_keyboard,
     main_menu,
     payment_receipt_keyboard,
