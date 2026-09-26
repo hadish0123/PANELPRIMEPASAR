@@ -73,7 +73,22 @@ async def _reject_message(message: Message) -> None:
 
 
 async def _reject_callback(callback: CallbackQuery) -> None:
-    await callback.answer("دسترسی ندارید.", show_alert=True)
+    try:
+        await callback.answer("دسترسی ندارید.", show_alert=True)
+    except TelegramAPIError:
+        pass
+
+
+async def _ack_callback(
+    callback: CallbackQuery,
+    text: str | None = None,
+) -> None:
+    try:
+        await callback.answer(text)
+    except TelegramAPIError:
+        # Telegram retries webhook updates after a previous handler error.
+        # An expired callback acknowledgement must not abort idempotent processing.
+        pass
 
 
 def _parse_callback_uuid(data: str | None, prefix: str) -> UUID | None:
@@ -789,7 +804,7 @@ async def approve_order(
         await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
-    await callback.answer("در حال تأیید و ساخت پنل...")
+    await _ack_callback(callback, "در حال تأیید و ساخت پنل...")
     try:
         payment = await approve_manual_order(
             session,
