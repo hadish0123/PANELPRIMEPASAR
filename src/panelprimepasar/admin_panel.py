@@ -3,11 +3,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import escape
 from typing import Annotated
+from urllib.parse import parse_qs
 from uuid import UUID
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -509,6 +511,70 @@ async def admin_login(
             permission.value for permission in ROLE_PERMISSIONS[role]
         ),
     }
+
+
+@router.post("/auth/login-form", include_in_schema=False)
+async def admin_login_form(
+    request: Request,
+    session: SessionDep,
+) -> RedirectResponse:
+    try:
+        raw_body = (await request.body()).decode("utf-8")
+    except UnicodeDecodeError:
+        return RedirectResponse(
+            url="/admin/ui?login_error=1",
+            status_code=303,
+        )
+
+    form = parse_qs(raw_body, keep_blank_values=True)
+    username = (form.get("username") or [""])[0].strip() or None
+    password = (form.get("password") or [""])[0] or None
+    api_key = (form.get("api_key") or [""])[0] or None
+
+    try:
+        result = await admin_login(
+            AdminLoginRequest(
+                username=username,
+                password=password,
+                api_key=api_key,
+            ),
+            session,
+        )
+    except HTTPException:
+        await session.rollback()
+        return RedirectResponse(
+            url="/admin/ui?login_error=1",
+            status_code=303,
+        )
+
+    token = result.get("token")
+    if not isinstance(token, str) or not token:
+        return RedirectResponse(
+            url="/admin/ui?login_error=1",
+            status_code=303,
+        )
+
+    response = RedirectResponse(url="/admin/ui", status_code=303)
+    response.set_cookie(
+        key="panelprimepasar_admin_session",
+        value=token,
+        max_age=get_settings().admin_panel_session_ttl_seconds,
+        path="/admin",
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
+    return response
+
+
+@router.post("/auth/logout", include_in_schema=False)
+async def admin_logout() -> RedirectResponse:
+    response = RedirectResponse(url="/admin/ui", status_code=303)
+    response.delete_cookie(
+        key="panelprimepasar_admin_session",
+        path="/admin",
+    )
+    return response
 
 
 @router.get("/auth/me")
