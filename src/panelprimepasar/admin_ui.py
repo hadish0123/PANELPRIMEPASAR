@@ -51,6 +51,7 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <button data-perm="manage_discounts" onclick="show('discounts')">🎟 تخفیف‌ها</button>
 <button data-perm="view_orders" onclick="show('orders')">🧾 سفارش‌ها</button>
 <button data-perm="view_payments" onclick="show('payments')">💳 پرداخت‌ها</button>
+<button data-perm="manage_payment_methods" onclick="show('paymentMethods')">🏦 روش‌های پرداخت</button>
 <button data-perm="view_orders" onclick="show('subscriptions')">🔄 سرویس‌ها</button>
 <button data-perm="manage_support" onclick="show('support')">🎧 پشتیبانی</button>
 <button data-perm="manage_admins" onclick="show('staff')">👮 مدیران</button>
@@ -133,6 +134,23 @@ const views={
  },
  orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>Number(r.quota_bytes).toLocaleString()]])},
  payments:async()=>{const rows=await api('/admin/payments?limit=100');$('#view').innerHTML='<h1>پرداخت‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['درگاه',r=>esc(r.provider)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>esc(r.status)],['تراکنش',r=>esc(r.transaction_id)]])},
+ paymentMethods:async()=>{
+  const rows=await api('/admin/payment-methods');
+  const form='<div class="card"><h2>افزودن روش پرداخت</h2><div class="toolbar">'+
+   '<input id="pmSlug" placeholder="شناسه کوتاه مثل zarinpal">'+
+   '<input id="pmName" placeholder="نام نمایشی">'+
+   '<select id="pmKind"><option value="manual_card">کارت‌به‌کارت</option><option value="zarinpal">زرین‌پال</option><option value="idpay">IDPay</option><option value="zibal">زیبال</option><option value="nextpay">NextPay</option></select>'+
+   '<input id="pmSecret" type="password" autocomplete="new-password" placeholder="Merchant ID / API Key">'+
+   '<input id="pmCard" placeholder="شماره کارت (کارت‌به‌کارت)">'+
+   '<input id="pmHolder" placeholder="نام صاحب کارت">'+
+   '<input id="pmBank" placeholder="بانک">'+
+   '<input id="pmIban" placeholder="شبا (اختیاری)">'+
+   '<label><input id="pmSandbox" type="checkbox"> تست/Sandbox</label>'+
+   '<label><input id="pmEnabled" type="checkbox"> فعال</label>'+
+   '<button class="btn small" onclick="createPaymentMethod()">➕ ذخیره</button></div>'+
+   '<p class="muted">اطلاعات محرمانه در پاسخ API نمایش داده نمی‌شود و با کلید PAYMENT_CREDENTIALS_MASTER_KEY رمزگذاری می‌شود.</p></div>';
+  $('#view').innerHTML='<h1>روش‌های پرداخت</h1>'+form+table(rows,[['نام',r=>esc(r.display_name)],['نوع',r=>esc(r.kind)],['شناسه',r=>'<code>'+esc(r.slug)+'</code>'],['حالت',r=>r.sandbox?'🧪 تست':'واقعی'],['اعتبارنامه',r=>r.kind==='manual_card'?'—':(r.credentials_configured?'✅ تنظیم شده':'❌ ناقص')],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['عملیات',r=>'<button class="btn small" onclick="togglePaymentMethod(\''+r.id+'\','+(!r.enabled)+')">'+(r.enabled?'غیرفعال':'فعال')+'</button><button class="btn small" onclick="editPaymentMethod(\''+r.id+'\')">✏️ ویرایش</button>']])
+ },
  subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['انقضا',r=>esc(r.expires_at||'∞')],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
  support:async()=>{const rows=await api('/admin/support?limit=100');$('#view').innerHTML='<h1>پشتیبانی</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['موضوع',r=>esc(r.subject)],['وضعیت',r=>esc(r.status)],['به‌روزرسانی',r=>esc(r.updated_at)]])},
  staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
@@ -161,6 +179,44 @@ async function createDiscount(){
  await api('/admin/discounts',{method:'POST',body:JSON.stringify(body)});show('discounts')
 }
 async function toggleDiscount(id,active){await api('/admin/discounts/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});show('discounts')}
+function paymentCredential(kind,value){
+ if(!value)return null;
+ if(kind==='zarinpal')return {merchant_id:value};
+ if(kind==='zibal')return {merchant:value};
+ return {api_key:value};
+}
+async function createPaymentMethod(){
+ const kind=$('#pmKind').value;
+ const publicConfig={};
+ if(kind==='manual_card'){
+  publicConfig.card_number=$('#pmCard').value;
+  publicConfig.card_holder=$('#pmHolder').value;
+  if($('#pmBank').value)publicConfig.bank_name=$('#pmBank').value;
+  if($('#pmIban').value)publicConfig.iban=$('#pmIban').value;
+ }
+ const body={slug:$('#pmSlug').value,kind,display_name:$('#pmName').value,is_enabled:$('#pmEnabled').checked,sandbox:$('#pmSandbox').checked,sort_order:0,public_config:publicConfig,credentials:paymentCredential(kind,$('#pmSecret').value)};
+ await api('/admin/payment-methods',{method:'POST',body:JSON.stringify(body)});show('paymentMethods')
+}
+async function togglePaymentMethod(id,enabled){
+ const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)return;
+ const body={slug:r.slug,kind:r.kind,display_name:r.display_name,is_enabled:enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:r.public_config,credentials:null};
+ await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});show('paymentMethods')
+}
+async function editPaymentMethod(id){
+ const rows=await api('/admin/payment-methods'),r=rows.find(x=>x.id===id);if(!r)return;
+ const name=prompt('نام نمایشی',r.display_name);if(name===null)return;
+ const secret=r.kind==='manual_card'?'':prompt('Merchant ID / API Key جدید (خالی = بدون تغییر)','');
+ const publicConfig={...r.public_config};
+ if(r.kind==='manual_card'){
+  const card=prompt('شماره کارت',publicConfig.card_number||'');if(card===null)return;
+  const holder=prompt('نام صاحب کارت',publicConfig.card_holder||'');if(holder===null)return;
+  publicConfig.card_number=card;publicConfig.card_holder=holder;
+  publicConfig.bank_name=prompt('نام بانک',publicConfig.bank_name||'')||'';
+  publicConfig.iban=prompt('شبا',publicConfig.iban||'')||'';
+ }
+ const body={slug:r.slug,kind:r.kind,display_name:name,is_enabled:r.enabled,sandbox:r.sandbox,sort_order:r.sort_order,public_config:publicConfig,credentials:secret?paymentCredential(r.kind,secret):null};
+ await api('/admin/payment-methods/'+id,{method:'PUT',body:JSON.stringify(body)});show('paymentMethods')
+}
 async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
 if(token()){api('/admin/auth/me').then(me=>{sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));$('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')}).catch(()=>sessionStorage.clear())}
 </script>
