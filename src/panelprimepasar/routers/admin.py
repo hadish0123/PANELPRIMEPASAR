@@ -27,7 +27,12 @@ from panelprimepasar.routers.customer import format_money, format_quota, order_s
 from panelprimepasar.security import Permission
 from panelprimepasar.services.admins import admin_has_permission
 from panelprimepasar.services.audit import record_audit_event
-from panelprimepasar.services.payments import PaymentStateError, approve_manual_order
+from panelprimepasar.services.payments import (
+    PaymentStateError,
+    approve_manual_order,
+    cancel_unpaid_order,
+    reject_pending_manual_payment,
+)
 from panelprimepasar.services.plan_inputs import (
     parse_price_toman,
     parse_quota,
@@ -858,6 +863,134 @@ async def approve_order(
         session=session,
         order_id=order_id,
     )
+
+
+@router.callback_query(F.data.startswith("admin:reject_payment:"))
+async def reject_payment(
+    callback: CallbackQuery,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.APPROVE_PAYMENTS,
+    ):
+        await _reject_callback(callback)
+        return
+
+    order_id = _parse_callback_uuid(callback.data, "admin:reject_payment:")
+    if order_id is None:
+        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        return
+
+    order_customer = await _get_order_customer(session, order_id)
+    if order_customer is None:
+        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        return
+    order, customer = order_customer
+
+    try:
+        payment = await reject_pending_manual_payment(
+            session,
+            order_id=order_id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="telegram_staff",
+            actor_id=str(callback.from_user.id),
+            action="payment.manual_rejected",
+            entity_type="order",
+            entity_id=str(order_id),
+            correlation_id=str(order_id),
+            metadata={
+                "payment_id": str(payment.id),
+                "provider": payment.provider,
+            },
+        )
+        await session.commit()
+    except PaymentStateError as exc:
+        await session.rollback()
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    await callback.answer("رسید رد شد.")
+    try:
+        await bot.send_message(
+            customer.telegram_user_id,
+            "❌ رسید پرداخت سفارش شما تأیید نشد. "
+            "می‌توانید رسید صحیح را دوباره از همان سفارش ارسال کنید.",
+        )
+    except TelegramAPIError:
+        pass
+
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            _order_details_text(order, customer),
+            reply_markup=admin_order_actions_keyboard(order),
+        )
+
+
+@router.callback_query(F.data.startswith("admin:cancel_order:"))
+async def cancel_order(
+    callback: CallbackQuery,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
+    if not await _has_permission(
+        session,
+        user_id=callback.from_user.id,
+        permission=Permission.MANAGE_ORDERS,
+    ):
+        await _reject_callback(callback)
+        return
+
+    order_id = _parse_callback_uuid(callback.data, "admin:cancel_order:")
+    if order_id is None:
+        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        return
+
+    order_customer = await _get_order_customer(session, order_id)
+    if order_customer is None:
+        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        return
+    _, customer = order_customer
+
+    try:
+        order = await cancel_unpaid_order(
+            session,
+            order_id=order_id,
+        )
+        await record_audit_event(
+            session,
+            actor_type="telegram_staff",
+            actor_id=str(callback.from_user.id),
+            action="order.canceled",
+            entity_type="order",
+            entity_id=str(order_id),
+            correlation_id=str(order_id),
+            metadata={"status": order.status.value},
+        )
+        await session.commit()
+    except PaymentStateError as exc:
+        await session.rollback()
+        await callback.answer(str(exc), show_alert=True)
+        return
+
+    await callback.answer("سفارش لغو شد.")
+    try:
+        await bot.send_message(
+            customer.telegram_user_id,
+            f"🗑 سفارش <code>{order.id}</code> توسط مدیریت لغو شد.",
+        )
+    except TelegramAPIError:
+        pass
+
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            _order_details_text(order, customer),
+            reply_markup=admin_order_actions_keyboard(order),
+        )
 
 
 @router.callback_query(F.data.startswith("admin:provision:"))
