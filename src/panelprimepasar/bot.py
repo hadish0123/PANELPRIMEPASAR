@@ -11,6 +11,7 @@ from panelprimepasar.routers import (
     admin_router,
     customer_router,
     services_router,
+    support_router,
 )
 
 
@@ -26,6 +27,7 @@ def build_dispatcher(settings: Settings) -> Dispatcher:
     dispatcher.include_router(admin_ops_router)
     dispatcher.include_router(customer_router)
     dispatcher.include_router(services_router)
+    dispatcher.include_router(support_router)
     return dispatcher
 
 
