@@ -9,7 +9,6 @@ from uuid import UUID
 
 from panelprimepasar.security.permissions import AdminRole
 
-
 _PASSWORD_SCHEME = "pbkdf2_sha256"
 _PASSWORD_ITERATIONS = 600_000
 
