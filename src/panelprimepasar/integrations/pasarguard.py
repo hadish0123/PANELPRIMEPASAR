@@ -226,7 +226,7 @@ class PasarGuardClient:
         response = await self._request(
             "GET",
             "/api/admins",
-            params={"username": username, "limit": "1"},
+            params={"usernames": username, "limit": "1"},
         )
         payload = PasarGuardAdminsResponse.model_validate(response.json())
         for admin in payload.admins:
