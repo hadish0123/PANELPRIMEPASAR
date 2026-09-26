@@ -120,3 +120,88 @@ async def close_ticket(
     ticket.closed_at = datetime.now(UTC)
     await session.flush()
     return ticket
+
+
+async def list_support_tickets(
+    session: AsyncSession,
+    *,
+    status: str | None = None,
+    limit: int = 20,
+) -> list[SupportTicket]:
+    query = select(SupportTicket)
+    if status is not None:
+        query = query.where(SupportTicket.status == status)
+    rows = await session.scalars(
+        query.order_by(
+            SupportTicket.updated_at.desc(),
+            SupportTicket.created_at.desc(),
+        ).limit(limit)
+    )
+    return list(rows.all())
+
+
+async def get_ticket_messages(
+    session: AsyncSession,
+    *,
+    ticket_id: UUID,
+    limit: int = 50,
+) -> list[SupportMessage]:
+    rows = await session.scalars(
+        select(SupportMessage)
+        .where(SupportMessage.ticket_id == ticket_id)
+        .order_by(SupportMessage.created_at.asc())
+        .limit(limit)
+    )
+    return list(rows.all())
+
+
+async def add_staff_message(
+    session: AsyncSession,
+    *,
+    ticket_id: UUID,
+    staff_telegram_id: int,
+    body: str,
+) -> tuple[SupportTicket, SupportMessage]:
+    ticket = await session.scalar(
+        select(SupportTicket)
+        .where(SupportTicket.id == ticket_id)
+        .with_for_update()
+    )
+    if ticket is None:
+        raise SupportStateError("تیکت پیدا نشد.")
+    if ticket.status == TicketStatus.CLOSED.value:
+        raise SupportStateError("این تیکت بسته شده است.")
+
+    clean_body = body.strip()
+    if not clean_body or len(clean_body) > 4000:
+        raise SupportStateError("متن پیام باید بین 1 تا 4000 کاراکتر باشد.")
+
+    message = SupportMessage(
+        ticket_id=ticket.id,
+        sender_type="staff",
+        sender_id=str(staff_telegram_id),
+        body=clean_body,
+    )
+    session.add(message)
+    ticket.status = TicketStatus.ANSWERED.value
+    await session.flush()
+    return ticket, message
+
+
+async def close_ticket_by_staff(
+    session: AsyncSession,
+    *,
+    ticket_id: UUID,
+) -> SupportTicket:
+    ticket = await session.scalar(
+        select(SupportTicket)
+        .where(SupportTicket.id == ticket_id)
+        .with_for_update()
+    )
+    if ticket is None:
+        raise SupportStateError("تیکت پیدا نشد.")
+
+    ticket.status = TicketStatus.CLOSED.value
+    ticket.closed_at = datetime.now(UTC)
+    await session.flush()
+    return ticket
