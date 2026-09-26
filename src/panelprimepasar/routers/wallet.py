@@ -12,6 +12,7 @@ from panelprimepasar.integrations.pasarguard import PasarGuardError
 from panelprimepasar.models import Customer, OrderKind
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.provisioning import ProvisioningStateError
 from panelprimepasar.services.subscriptions import SubscriptionStateError
 from panelprimepasar.services.wallets import (
@@ -185,11 +186,16 @@ async def wallet_pay(
             return
 
         settings = get_settings()
+        panel_url = await resolve_order_panel_url(
+            session,
+            settings=settings,
+            order_id=order_id,
+        )
         try:
             await bot.send_message(
                 customer.telegram_user_id,
                 "<b>پنل نمایندگی شما آماده است.</b>\n\n"
-                f"آدرس پنل: <code>{escape(str(settings.pasarguard_base_url).rstrip('/'))}</code>\n"
+                f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
                 f"نام کاربری: <code>{escape(credentials.username)}</code>\n"
                 f"رمز عبور: <code>{escape(credentials.password)}</code>\n\n"
                 "رمز را در محل امن نگه‌داری کنید.",
