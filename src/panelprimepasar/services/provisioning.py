@@ -2,7 +2,7 @@ import random
 import secrets
 import string
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -17,10 +17,13 @@ from panelprimepasar.integrations.pasarguard import (
 from panelprimepasar.models import (
     Customer,
     Order,
+    OrderKind,
     OrderStatus,
     PasarGuardAccount,
     ProvisioningJob,
     ProvisioningStatus,
+    Subscription,
+    SubscriptionStatus,
 )
 
 
@@ -125,6 +128,40 @@ class ProvisioningService:
             await session.flush()
         return job
 
+    async def _ensure_subscription(
+        self,
+        session: AsyncSession,
+        *,
+        order: Order,
+        account: PasarGuardAccount,
+    ) -> Subscription:
+        subscription = await session.scalar(
+            select(Subscription).where(Subscription.source_order_id == order.id)
+        )
+        if subscription is not None:
+            return subscription
+
+        starts_at = datetime.now(UTC)
+        expires_at = (
+            starts_at + timedelta(days=order.validity_days)
+            if order.validity_days is not None
+            else None
+        )
+        subscription = Subscription(
+            customer_id=order.customer_id,
+            plan_id=order.plan_id,
+            pasar_guard_account_id=account.id,
+            source_order_id=order.id,
+            status=SubscriptionStatus.ACTIVE.value,
+            quota_bytes=order.quota_bytes,
+            starts_at=starts_at,
+            expires_at=expires_at,
+            auto_renew=False,
+        )
+        session.add(subscription)
+        await session.flush()
+        return subscription
+
     async def reissue_credentials(
         self,
         session: AsyncSession,
@@ -136,6 +173,10 @@ class ProvisioningService:
         )
         if order is None:
             raise ProvisioningStateError("Order not found")
+        if order.kind != OrderKind.NEW:
+            raise ProvisioningStateError(
+                f"Order kind {order.kind.value!r} must use subscription lifecycle provisioning"
+            )
 
         customer = await session.scalar(
             select(Customer).where(Customer.id == order.customer_id)
@@ -216,6 +257,11 @@ class ProvisioningService:
             existing_account is not None
             and existing_account.pasarguard_admin_id is not None
         ):
+            await self._ensure_subscription(
+                session,
+                order=order,
+                account=existing_account,
+            )
             order.status = OrderStatus.COMPLETED
             job = await self._get_job(session, order.id)
             job.status = ProvisioningStatus.SUCCEEDED
@@ -289,6 +335,12 @@ class ProvisioningService:
             is_active=True,
         )
         session.add(account)
+        await session.flush()
+        await self._ensure_subscription(
+            session,
+            order=order,
+            account=account,
+        )
 
         order.status = OrderStatus.COMPLETED
         job.status = ProvisioningStatus.SUCCEEDED
