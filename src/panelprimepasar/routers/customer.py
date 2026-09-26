@@ -32,6 +32,8 @@ from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
 )
+
+
 router = Router(name="customer")
 
 
