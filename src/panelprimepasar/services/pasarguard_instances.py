@@ -17,7 +17,6 @@ from panelprimepasar.integrations.pasarguard import (
 )
 from panelprimepasar.models import PasarGuardAccount, PasarGuardInstance
 
-
 ClientBuilder = Callable[..., PasarGuardClient]
 
 
