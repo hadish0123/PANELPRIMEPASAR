@@ -226,7 +226,7 @@ class PasarGuardClient:
         response = await self._request(
             "GET",
             "/api/admins",
-            params={"usernames": username, "limit": "1"},
+            params={"username": username, "limit": "1"},
         )
         payload = PasarGuardAdminsResponse.model_validate(response.json())
         for admin in payload.admins:
@@ -280,13 +280,19 @@ class PasarGuardClient:
             )
 
         try:
-            return await self.create_admin(
+            await self.create_admin(
                 username=username,
                 password=password,
                 role_id=role_id,
                 data_limit=data_limit,
                 note=note,
             )
+            created = await self.find_admin_by_username(username)
+            if created is None or created.id is None:
+                raise PasarGuardError(
+                    "Created PasarGuard admin could not be verified by username"
+                )
+            return created
         except PasarGuardConflictError:
             existing = await self.find_admin_by_username(username)
             if existing is None or existing.id is None:
