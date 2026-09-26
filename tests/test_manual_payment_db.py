@@ -4,7 +4,15 @@ import pytest
 from sqlalchemy import func, select
 
 from panelprimepasar.db import SessionFactory
-from panelprimepasar.models import Customer, Order, OrderStatus, Payment, PaymentStatus, Plan
+from panelprimepasar.models import (
+    Customer,
+    Order,
+    OrderStatus,
+    Payment,
+    PaymentMethodConfig,
+    PaymentStatus,
+    Plan,
+)
 from panelprimepasar.services.payments import (
     PaymentStateError,
     approve_manual_order,
@@ -188,4 +196,76 @@ async def test_cancel_unpaid_order_fails_pending_payments() -> None:
                 order_id=order.id,
                 provider="manual",
             )
+        await session.rollback()
+
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_manual_card_method_approval_reuses_selected_payment() -> None:
+    marker = uuid4().hex
+
+    async with SessionFactory() as session:
+        customer = Customer(
+            telegram_user_id=int(marker[:15], 16),
+            telegram_username=f"card_{marker[:8]}",
+            first_name="Card",
+            last_name=None,
+        )
+        plan = Plan(
+            name=f"card-plan-{marker}",
+            quota_bytes=100_000_000_000,
+            price_amount=45_000,
+            currency="IRT",
+            validity_days=30,
+            is_active=True,
+            sort_order=0,
+        )
+        method = PaymentMethodConfig(
+            slug=f"card{marker[:8]}",
+            kind="manual_card",
+            display_name="کارت به کارت",
+            is_enabled=True,
+            sandbox=False,
+            sort_order=0,
+            public_config_json=(
+                '{"card_holder":"Test","card_number":"6037991234567890"}'
+            ),
+            secret_config_encrypted=None,
+        )
+        session.add_all([customer, plan, method])
+        await session.flush()
+
+        order = Order(
+            customer_id=customer.id,
+            plan_id=plan.id,
+            status=OrderStatus.AWAITING_PAYMENT,
+            price_amount=plan.price_amount,
+            currency=plan.currency,
+            quota_bytes=plan.quota_bytes,
+            validity_days=plan.validity_days,
+            idempotency_key=f"card-method:{marker}",
+        )
+        session.add(order)
+        await session.flush()
+
+        selected = await create_pending_payment(
+            session,
+            order_id=order.id,
+            provider="manual",
+            payment_method_id=method.id,
+            raw_reference="telegram:photo:selected-card",
+        )
+        approved = await approve_manual_order(
+            session,
+            order_id=order.id,
+            actor_telegram_id=999,
+        )
+        payment_count = await session.scalar(
+            select(func.count(Payment.id)).where(Payment.order_id == order.id)
+        )
+
+        assert approved.id == selected.id
+        assert approved.payment_method_id == method.id
+        assert approved.status == PaymentStatus.VERIFIED
+        assert payment_count == 1
         await session.rollback()
