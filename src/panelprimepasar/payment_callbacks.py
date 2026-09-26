@@ -18,6 +18,7 @@ from panelprimepasar.models import (
     OrderKind,
     Payment,
     PaymentMethodConfig,
+    PaymentMethodKind,
     PaymentStatus,
 )
 from panelprimepasar.payments.base import PaymentProviderError
@@ -99,6 +100,19 @@ async def payment_callback(
         raise HTTPException(status_code=500, detail="Payment customer not found")
 
     was_verified = payment.status == PaymentStatus.VERIFIED
+    if (
+        method.kind == PaymentMethodKind.ZARINPAL.value
+        and not was_verified
+    ):
+        callback_status = request.query_params.get("Status")
+        if callback_status is not None and callback_status.upper() != "OK":
+            return _page(
+                "پرداخت لغو شد",
+                "زرین‌پال این بازگشت را پرداخت موفق اعلام نکرد. "
+                "می‌توانید دوباره از داخل ربات پرداخت را انجام دهید.",
+                ok=False,
+            )
+
     try:
         verified = await verify_external_payment(
             session,
