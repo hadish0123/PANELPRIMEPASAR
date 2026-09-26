@@ -13,15 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from panelprimepasar.config import get_settings
 from panelprimepasar.keyboards.admin import admin_order_notification_keyboard
 from panelprimepasar.keyboards.customer import (
-    lifecycle_plans_keyboard,
     main_menu,
     payment_receipt_keyboard,
     plan_actions_keyboard,
     plans_keyboard,
-    subscription_actions_keyboard,
-    subscriptions_keyboard,
 )
-from panelprimepasar.models import Customer, Order, OrderKind, OrderStatus
+from panelprimepasar.models import Customer, Order, OrderStatus
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
@@ -34,11 +31,6 @@ from panelprimepasar.services.orders import (
 from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
-)
-from panelprimepasar.services.subscriptions import (
-    create_lifecycle_order,
-    get_customer_subscription,
-    list_customer_subscriptions,
 )
 from panelprimepasar.services.support import (
     SupportStateError,
@@ -415,7 +407,7 @@ async def receipt_invalid_message(message: Message) -> None:
     await message.answer("لطفاً تصویر یا فایل رسید پرداخت را ارسال کنید.")
 
 
-@router.message(F.text == "📦 سفارش‌های من")
+@router.message(F.text == "📜 سفارش‌های من")
 async def my_orders_handler(message: Message, session: AsyncSession) -> None:
     customer = await ensure_customer(message, session)
     if customer is None:
@@ -437,213 +429,6 @@ async def my_orders_handler(message: Message, session: AsyncSession) -> None:
 
     await message.answer("<b>سفارش‌های اخیر</b>\n\n" + "\n".join(rows))
 
-
-
-@router.message(F.text == "📡 سرویس‌های من")
-async def my_services_handler(message: Message, session: AsyncSession) -> None:
-    customer = await ensure_customer(message, session)
-    if customer is None:
-        return
-    subscriptions = await list_customer_subscriptions(session, customer_id=customer.id)
-    if not subscriptions:
-        await message.answer("هنوز سرویس فعالی برای حساب شما ثبت نشده است.")
-        return
-    await message.answer(
-        "سرویس موردنظر را انتخاب کنید:",
-        reply_markup=subscriptions_keyboard(subscriptions),
-    )
-
-
-@router.callback_query(F.data == "services")
-async def my_services_callback(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
-    user = callback.from_user
-    customer = await session.scalar(
-        select(Customer).where(Customer.telegram_user_id == user.id)
-    )
-    if customer is None or not isinstance(callback.message, Message):
-        return
-    subscriptions = await list_customer_subscriptions(session, customer_id=customer.id)
-    if not subscriptions:
-        await callback.message.answer("هنوز سرویسی برای حساب شما ثبت نشده است.")
-        return
-    await callback.message.answer(
-        "سرویس موردنظر را انتخاب کنید:",
-        reply_markup=subscriptions_keyboard(subscriptions),
-    )
-
-
-@router.callback_query(F.data.startswith("service:"))
-async def service_details(callback: CallbackQuery, session: AsyncSession) -> None:
-    try:
-        subscription_id = UUID((callback.data or "").removeprefix("service:"))
-    except ValueError:
-        await callback.answer("شناسه سرویس معتبر نیست.", show_alert=True)
-        return
-
-    customer = await session.scalar(
-        select(Customer).where(Customer.telegram_user_id == callback.from_user.id)
-    )
-    if customer is None:
-        await callback.answer("حساب مشتری پیدا نشد.", show_alert=True)
-        return
-
-    subscription = await get_customer_subscription(
-        session,
-        customer_id=customer.id,
-        subscription_id=subscription_id,
-    )
-    if subscription is None:
-        await callback.answer("سرویس پیدا نشد.", show_alert=True)
-        return
-
-    expires = (
-        subscription.expires_at.strftime("%Y-%m-%d %H:%M UTC")
-        if subscription.expires_at is not None
-        else "بدون تاریخ انقضا"
-    )
-    await callback.answer()
-    if isinstance(callback.message, Message):
-        await callback.message.answer(
-            f"<b>سرویس {str(subscription.id)[:8]}</b>\n\n"
-            f"وضعیت: <b>{escape(subscription.status)}</b>\n"
-            f"حجم: <b>{format_quota(subscription.quota_bytes)}</b>\n"
-            f"انقضا: <b>{expires}</b>",
-            reply_markup=subscription_actions_keyboard(subscription.id),
-        )
-
-
-async def _lifecycle_catalog(
-    callback: CallbackQuery,
-    session: AsyncSession,
-    *,
-    action: str,
-) -> None:
-    prefix = f"service_{action}:"
-    try:
-        subscription_id = UUID((callback.data or "").removeprefix(prefix))
-    except ValueError:
-        await callback.answer("شناسه سرویس معتبر نیست.", show_alert=True)
-        return
-
-    customer = await session.scalar(
-        select(Customer).where(Customer.telegram_user_id == callback.from_user.id)
-    )
-    if customer is None:
-        await callback.answer("حساب مشتری پیدا نشد.", show_alert=True)
-        return
-    subscription = await get_customer_subscription(
-        session,
-        customer_id=customer.id,
-        subscription_id=subscription_id,
-    )
-    if subscription is None:
-        await callback.answer("سرویس پیدا نشد.", show_alert=True)
-        return
-
-    plans = await list_active_plans(session)
-    await callback.answer()
-    if isinstance(callback.message, Message):
-        if not plans:
-            await callback.message.answer("در حال حاضر پلن فعالی وجود ندارد.")
-            return
-        title = "پلن تمدید را انتخاب کنید:" if action == "renew" else "بسته افزایش حجم را انتخاب کنید:"
-        await callback.message.answer(
-            title,
-            reply_markup=lifecycle_plans_keyboard(
-                plans,
-                subscription_id=subscription.id,
-                action=action,
-            ),
-        )
-
-
-@router.callback_query(F.data.startswith("service_renew:"))
-async def renewal_catalog(callback: CallbackQuery, session: AsyncSession) -> None:
-    await _lifecycle_catalog(callback, session, action="renew")
-
-
-@router.callback_query(F.data.startswith("service_topup:"))
-async def topup_catalog(callback: CallbackQuery, session: AsyncSession) -> None:
-    await _lifecycle_catalog(callback, session, action="topup")
-
-
-@router.callback_query(F.data.startswith("renew_plan:") | F.data.startswith("topup_plan:"))
-async def lifecycle_checkout(callback: CallbackQuery, session: AsyncSession) -> None:
-    data = callback.data or ""
-    action = "renew" if data.startswith("renew_plan:") else "topup"
-    payload = data.removeprefix(f"{action}_plan:")
-    try:
-        subscription_raw, plan_raw = payload.split(":", maxsplit=1)
-        subscription_id = UUID(subscription_raw)
-        plan_id = UUID(plan_raw)
-    except (ValueError, TypeError):
-        await callback.answer("اطلاعات سفارش معتبر نیست.", show_alert=True)
-        return
-
-    customer = await session.scalar(
-        select(Customer).where(Customer.telegram_user_id == callback.from_user.id)
-    )
-    if customer is None:
-        await callback.answer("حساب مشتری پیدا نشد.", show_alert=True)
-        return
-    subscription = await get_customer_subscription(
-        session,
-        customer_id=customer.id,
-        subscription_id=subscription_id,
-    )
-    plan = await get_active_plan(session, plan_id)
-    if subscription is None or plan is None:
-        await callback.answer("سرویس یا پلن در دسترس نیست.", show_alert=True)
-        return
-
-    kind = OrderKind.RENEWAL if action == "renew" else OrderKind.TOPUP
-    message_id = callback.message.message_id if isinstance(callback.message, Message) else 0
-    key = f"lifecycle:{callback.from_user.id}:{message_id}:{subscription.id}:{plan.id}:{kind.value}"
-    order, created = await create_lifecycle_order(
-        session,
-        customer=customer,
-        subscription=subscription,
-        plan=plan,
-        kind=kind,
-        idempotency_key=key,
-    )
-    await callback.answer("سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است.")
-    if not isinstance(callback.message, Message):
-        return
-
-    instructions = get_settings().manual_payment_instructions
-    payment_text = (
-        escape(instructions)
-        if instructions
-        else "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است."
-    )
-    await callback.message.answer(
-        f"شماره سفارش: <code>{order.id}</code>\n"
-        f"نوع: <b>{'تمدید' if kind == OrderKind.RENEWAL else 'افزایش حجم'}</b>\n"
-        f"مبلغ: <b>{format_money(order.price_amount, order.currency)}</b>\n\n"
-        f"{payment_text}\n\n"
-        "پس از پرداخت، رسید را ارسال کنید.",
-        reply_markup=payment_receipt_keyboard(order.id),
-    )
-
-
-@router.message(F.text == "👤 حساب من")
-async def profile_handler(message: Message, session: AsyncSession) -> None:
-    customer = await ensure_customer(message, session)
-    if customer is None:
-        return
-    subscriptions = await list_customer_subscriptions(session, customer_id=customer.id)
-    orders = await list_customer_orders(session, customer_id=customer.id)
-    active_count = sum(1 for item in subscriptions if item.status == "active")
-    username = f"@{escape(customer.telegram_username)}" if customer.telegram_username else "ثبت نشده"
-    await message.answer(
-        "<b>حساب کاربری</b>\n\n"
-        f"Telegram ID: <code>{customer.telegram_user_id}</code>\n"
-        f"Username: {username}\n"
-        f"تعداد سفارش‌ها: <b>{len(orders)}</b>\n"
-        f"سرویس‌های فعال: <b>{active_count}</b>"
-    )
 
 
 @router.message(F.text == "🎧 پشتیبانی")
@@ -686,15 +471,13 @@ async def support_body(
     customer = await ensure_customer(message, session)
     if customer is None:
         return
-    body = (message.text or "").strip()
     data = await state.get_data()
-    subject = str(data.get("subject", ""))
     try:
         ticket = await create_ticket(
             session,
             customer_id=customer.id,
-            subject=subject,
-            body=body,
+            subject=str(data.get("subject", "")),
+            body=(message.text or "").strip(),
         )
     except SupportStateError as exc:
         await message.answer(escape(str(exc)))
@@ -711,11 +494,11 @@ async def support_body(
     )
     await session.commit()
     await state.clear()
-
     await message.answer(
         f"تیکت ثبت شد.\nشناسه: <code>{ticket.id}</code>",
         reply_markup=main_menu(),
     )
+
     for owner_id in get_settings().telegram_owner_ids:
         try:
             await bot.send_message(
@@ -727,15 +510,3 @@ async def support_body(
             )
         except TelegramAPIError:
             continue
-
-
-@router.message(F.text == "ℹ️ راهنما")
-async def help_handler(message: Message) -> None:
-    await message.answer(
-        "<b>راهنمای ربات</b>\n\n"
-        "🛒 خرید پنل: انتخاب و ثبت سفارش جدید\n"
-        "📡 سرویس‌های من: مشاهده، تمدید و افزایش حجم\n"
-        "📦 سفارش‌های من: پیگیری وضعیت سفارش‌ها\n"
-        "👤 حساب من: خلاصه حساب و سرویس‌ها\n"
-        "🎧 پشتیبانی: ثبت تیکت برای مدیریت"
-    )
