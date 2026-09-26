@@ -1562,7 +1562,7 @@ async def update_payment_method(
 
 
 @router.delete("/payment-methods/{method_id}")
-async def disable_payment_method(
+async def delete_payment_method(
     method_id: UUID,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
@@ -1578,18 +1578,45 @@ async def disable_payment_method(
     if method is None:
         raise HTTPException(status_code=404, detail="Payment method not found")
 
-    method.is_enabled = False
-    await record_audit_event(
-        session,
-        actor_type="web_admin",
-        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
-        action="payment_method.disabled",
-        entity_type="payment_method",
-        entity_id=str(method.id),
-        metadata={"slug": method.slug, "kind": method.kind},
+    payment_reference = await session.scalar(
+        select(Payment.id).where(Payment.payment_method_id == method.id).limit(1)
     )
-    await session.commit()
-    return payment_method_public_view(method)
+    if payment_reference is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "این روش پرداخت سابقه تراکنش دارد و قابل حذف نیست؛ "
+                "برای متوقف‌کردن آن، روش پرداخت را غیرفعال کنید."
+            ),
+        )
+
+    method_id_text = str(method.id)
+    try:
+        await session.delete(method)
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action="payment_method.deleted",
+            entity_type="payment_method",
+            entity_id=method_id_text,
+            metadata={"slug": method.slug, "kind": method.kind},
+        )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "این روش پرداخت هم‌اکنون در یک تراکنش استفاده می‌شود و "
+                "قابل حذف نیست."
+            ),
+        ) from exc
+    return {"id": method_id_text, "deleted": True}
 
 
 @router.get("/payments")

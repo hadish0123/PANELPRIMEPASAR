@@ -6,6 +6,7 @@ def test_mobile_layout_keeps_logout_and_form_actions_available() -> None:
     assert '.nav-label,.side-footer{display:none}' not in _ADMIN_HTML
     assert 'class="btn danger side-logout"' in _ADMIN_HTML
     assert '.toolbar > .btn.small{width:100%!important' in _ADMIN_HTML
+    assert '.toolbar > .payment-field{flex-direction:column' in _ADMIN_HTML
     assert '<meta name="viewport" content="width=device-width,initial-scale=1">' in _ADMIN_HTML
 
 
@@ -53,6 +54,20 @@ def test_payment_method_fields_open_only_after_their_choice() -> None:
     assert "selectPaymentKind(\\'zibal\\'" in _ADMIN_JS
     assert "selectPaymentKind(\\'nextpay\\'" in _ADMIN_JS
     assert '<select id="pmKind">' not in _ADMIN_JS
+
+
+def test_payment_methods_offer_full_form_editing_and_deletion() -> None:
+    assert "let paymentMethodsCache=[]" in _ADMIN_JS
+    assert "let editingPaymentMethod=null" in _ADMIN_JS
+    assert "function paymentMethodPayload()" in _ADMIN_JS
+    assert 'id="pmSort"' in _ADMIN_JS
+    assert 'id="pmOriginalKind"' in _ADMIN_JS
+    assert 'id="pmCredentialsConfigured"' in _ADMIN_JS
+    assert "method:values.methodId?'PUT':'POST'" in _ADMIN_JS
+    assert "prompt('نام نمایشی'" not in _ADMIN_JS
+    assert "async function deletePaymentMethod(id,button)" in _ADMIN_JS
+    assert "onclick=\"deletePaymentMethod(" in _ADMIN_JS
+    assert "روش دارای تراکنش قابل حذف نیست" in _ADMIN_JS
 
 
 def test_completed_orders_offer_quota_sync_without_password_rotation() -> None:
