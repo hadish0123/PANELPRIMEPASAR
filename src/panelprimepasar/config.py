@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     subscription_maintenance_enabled: bool = False
     subscription_maintenance_interval_seconds: int = 300
     subscription_expiry_warning_hours: int = 72
+    discount_reservation_max_age_hours: int = 24
 
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/panelprimepasar"
     redis_url: str = "redis://localhost:6379/0"
