@@ -1,7 +1,7 @@
 from panelprimepasar.security.permissions import (
+    ROLE_PERMISSIONS,
     AdminRole,
     Permission,
-    ROLE_PERMISSIONS,
     has_permission,
 )
 
