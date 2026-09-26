@@ -63,6 +63,13 @@ class PurchaseClient:
             ),
         )
 
+    async def find_admin_by_username(
+        self,
+        username: str,
+    ) -> PasarGuardAdmin | None:
+        del username
+        return None
+
     async def modify_admin_by_id(
         self,
         admin_id: int,
