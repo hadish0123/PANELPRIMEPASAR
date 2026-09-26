@@ -32,22 +32,12 @@ from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
 )
-from panelprimepasar.services.support import (
-    SupportStateError,
-    create_ticket,
-    list_customer_tickets,
-)
-
 router = Router(name="customer")
 
 
 class ReceiptForm(StatesGroup):
     waiting_receipt = State()
 
-
-class SupportForm(StatesGroup):
-    subject = State()
-    body = State()
 
 
 def format_money(amount: int, currency: str) -> str:
@@ -428,85 +418,3 @@ async def my_orders_handler(message: Message, session: AsyncSession) -> None:
         )
 
     await message.answer("<b>سفارش‌های اخیر</b>\n\n" + "\n".join(rows))
-
-
-
-@router.message(F.text == "🎧 پشتیبانی")
-async def support_menu(message: Message, session: AsyncSession, state: FSMContext) -> None:
-    customer = await ensure_customer(message, session)
-    if customer is None:
-        return
-    tickets = await list_customer_tickets(session, customer_id=customer.id)
-    await state.clear()
-    recent = "\n".join(
-        f"• <code>{ticket.id}</code> — {escape(ticket.subject)} — {escape(ticket.status)}"
-        for ticket in tickets[:5]
-    )
-    await message.answer(
-        "<b>پشتیبانی</b>\n\n"
-        + (f"تیکت‌های اخیر:\n{recent}\n\n" if recent else "")
-        + "برای ساخت تیکت جدید، موضوع را ارسال کنید."
-    )
-    await state.set_state(SupportForm.subject)
-
-
-@router.message(SupportForm.subject)
-async def support_subject(message: Message, state: FSMContext) -> None:
-    subject = (message.text or "").strip()
-    if not subject or len(subject) > 160:
-        await message.answer("موضوع باید بین 1 تا 160 کاراکتر باشد.")
-        return
-    await state.update_data(subject=subject)
-    await state.set_state(SupportForm.body)
-    await message.answer("متن درخواست پشتیبانی را ارسال کنید.")
-
-
-@router.message(SupportForm.body)
-async def support_body(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-    bot: Bot,
-) -> None:
-    customer = await ensure_customer(message, session)
-    if customer is None:
-        return
-    data = await state.get_data()
-    try:
-        ticket = await create_ticket(
-            session,
-            customer_id=customer.id,
-            subject=str(data.get("subject", "")),
-            body=(message.text or "").strip(),
-        )
-    except SupportStateError as exc:
-        await message.answer(escape(str(exc)))
-        return
-
-    await record_audit_event(
-        session,
-        actor_type="customer",
-        actor_id=str(customer.telegram_user_id),
-        action="support.ticket_created",
-        entity_type="support_ticket",
-        entity_id=str(ticket.id),
-        correlation_id=str(ticket.id),
-    )
-    await session.commit()
-    await state.clear()
-    await message.answer(
-        f"تیکت ثبت شد.\nشناسه: <code>{ticket.id}</code>",
-        reply_markup=main_menu(),
-    )
-
-    for owner_id in get_settings().telegram_owner_ids:
-        try:
-            await bot.send_message(
-                owner_id,
-                "<b>تیکت پشتیبانی جدید</b>\n"
-                f"شناسه: <code>{ticket.id}</code>\n"
-                f"مشتری: <code>{customer.telegram_user_id}</code>\n"
-                f"موضوع: {escape(ticket.subject)}",
-            )
-        except TelegramAPIError:
-            continue
