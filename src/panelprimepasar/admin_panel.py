@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from panelprimepasar.models import (
     OrderKind,
     OrderStatus,
     PasarGuardAccount,
+    PasarGuardInstance,
     Payment,
     PaymentStatus,
     Plan,
@@ -137,6 +138,28 @@ class DiscountUpdateRequest(BaseModel):
     max_uses: int | None = Field(default=None, gt=0)
     expires_at: datetime | None = None
     is_active: bool | None = None
+
+
+class PasarGuardInstanceCreateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    base_url: AnyHttpUrl
+    api_key_env_var: str | None = Field(default=None, min_length=1, max_length=128)
+    bearer_token_env_var: str | None = Field(default=None, min_length=1, max_length=128)
+    reseller_role_name: str | None = Field(default=None, max_length=128)
+    reseller_role_id: int | None = Field(default=None, ge=1)
+    weight: int = Field(default=100, ge=1, le=10_000)
+    is_enabled: bool = True
+
+
+class PasarGuardInstanceUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=128)
+    base_url: AnyHttpUrl | None = None
+    api_key_env_var: str | None = Field(default=None, min_length=1, max_length=128)
+    bearer_token_env_var: str | None = Field(default=None, min_length=1, max_length=128)
+    reseller_role_name: str | None = Field(default=None, max_length=128)
+    reseller_role_id: int | None = Field(default=None, ge=1)
+    weight: int | None = Field(default=None, ge=1, le=10_000)
+    is_enabled: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -893,6 +916,185 @@ async def subscriptions(
     ]
 
 
+@router.get("/pasarguard/instances")
+async def pasarguard_instances(
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> list[dict[str, object]]:
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    rows = (
+        await session.scalars(
+            select(PasarGuardInstance).order_by(
+                PasarGuardInstance.name.asc(),
+                PasarGuardInstance.id.asc(),
+            )
+        )
+    ).all()
+    return [
+        {
+            "id": str(row.id),
+            "name": row.name,
+            "base_url": row.base_url,
+            "api_key_env_var": row.api_key_env_var,
+            "bearer_token_env_var": row.bearer_token_env_var,
+            "reseller_role_name": row.reseller_role_name,
+            "reseller_role_id": row.reseller_role_id,
+            "weight": row.weight,
+            "enabled": row.is_enabled,
+            "last_health_at": (
+                row.last_health_at.isoformat()
+                if row.last_health_at is not None
+                else None
+            ),
+            "last_health_ok": row.last_health_ok,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/pasarguard/instances", status_code=201)
+async def create_pasarguard_instance(
+    payload: PasarGuardInstanceCreateRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    if bool(payload.api_key_env_var) == bool(payload.bearer_token_env_var):
+        raise HTTPException(
+            status_code=400,
+            detail="Configure exactly one credential environment variable name",
+        )
+
+    name = payload.name.strip()
+    duplicate = await session.scalar(
+        select(PasarGuardInstance).where(PasarGuardInstance.name == name)
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="PasarGuard instance name already exists")
+
+    instance = PasarGuardInstance(
+        name=name,
+        base_url=str(payload.base_url).rstrip("/"),
+        api_key_env_var=payload.api_key_env_var,
+        bearer_token_env_var=payload.bearer_token_env_var,
+        reseller_role_name=payload.reseller_role_name,
+        reseller_role_id=payload.reseller_role_id,
+        weight=payload.weight,
+        is_enabled=payload.is_enabled,
+    )
+    session.add(instance)
+    await session.flush()
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="pasarguard_instance.created",
+        entity_type="pasarguard_instance",
+        entity_id=str(instance.id),
+        metadata={
+            "name": instance.name,
+            "base_url": instance.base_url,
+            "api_key_env_var": instance.api_key_env_var,
+            "bearer_token_env_var": instance.bearer_token_env_var,
+        },
+    )
+    await session.commit()
+    return {"id": str(instance.id), "name": instance.name, "enabled": instance.is_enabled}
+
+
+@router.patch("/pasarguard/instances/{instance_id}")
+async def update_pasarguard_instance(
+    instance_id: UUID,
+    payload: PasarGuardInstanceUpdateRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    instance = await session.get(PasarGuardInstance, instance_id)
+    if instance is None:
+        raise HTTPException(status_code=404, detail="PasarGuard instance not found")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "name" in changes:
+        name = str(changes["name"]).strip()
+        duplicate = await session.scalar(
+            select(PasarGuardInstance).where(
+                PasarGuardInstance.name == name,
+                PasarGuardInstance.id != instance.id,
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="PasarGuard instance name already exists")
+        instance.name = name
+    if "base_url" in changes:
+        instance.base_url = str(changes["base_url"]).rstrip("/")
+    if "api_key_env_var" in changes:
+        instance.api_key_env_var = changes["api_key_env_var"]
+    if "bearer_token_env_var" in changes:
+        instance.bearer_token_env_var = changes["bearer_token_env_var"]
+    if bool(instance.api_key_env_var) == bool(instance.bearer_token_env_var):
+        raise HTTPException(
+            status_code=400,
+            detail="Configure exactly one credential environment variable name",
+        )
+    if "reseller_role_name" in changes:
+        instance.reseller_role_name = changes["reseller_role_name"]
+    if "reseller_role_id" in changes:
+        instance.reseller_role_id = changes["reseller_role_id"]
+    if "weight" in changes:
+        instance.weight = int(changes["weight"])
+    if "is_enabled" in changes:
+        instance.is_enabled = bool(changes["is_enabled"])
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="pasarguard_instance.updated",
+        entity_type="pasarguard_instance",
+        entity_id=str(instance.id),
+        metadata={"fields": sorted(changes)},
+    )
+    await session.commit()
+    return {"id": str(instance.id), "name": instance.name, "enabled": instance.is_enabled}
+
+
+@router.post("/pasarguard/instances/health")
+async def check_pasarguard_instances(
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> list[dict[str, object]]:
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
+    router = PasarGuardInstanceRouter(settings=get_settings())
+    rows = await router.health_snapshot(session)
+    await session.commit()
+    return rows
+
+
 @router.get("/pasarguard/accounts")
 async def pasar_guard_accounts(
     session: SessionDep,
@@ -927,6 +1129,11 @@ async def pasar_guard_accounts(
             "id": str(row.id),
             "customer_id": str(row.customer_id),
             "order_id": str(row.order_id),
+            "pasarguard_instance_id": (
+                str(row.pasarguard_instance_id)
+                if row.pasarguard_instance_id is not None
+                else None
+            ),
             "pasarguard_admin_id": row.pasarguard_admin_id,
             "username": row.username,
             "role_id": row.role_id,
