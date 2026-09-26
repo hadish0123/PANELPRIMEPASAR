@@ -153,7 +153,7 @@ async def manual_card_payment(
                     [
                         InlineKeyboardButton(
                             text="📎 ارسال رسید",
-                            callback_data=f"receipt:{order.id}",
+                            callback_data=f"rm:{method.slug}:{order.id.hex}",
                         )
                     ]
                 ]
