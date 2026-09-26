@@ -147,8 +147,7 @@ async def manual_card_payment(
     await callback.answer()
     if isinstance(callback.message, Message):
         await callback.message.answer(
-            "
-".join(lines),
+            "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -223,8 +222,7 @@ async def online_gateway_payment(
         if isinstance(callback.message, Message):
             await callback.message.answer(
                 "در ایجاد پرداخت بانکی خطایی رخ داد. "
-                "روش دیگری را انتخاب کنید یا کمی بعد دوباره تلاش کنید.
-"
+                "روش دیگری را انتخاب کنید یا کمی بعد دوباره تلاش کنید.\n"
                 f"<code>{escape(str(exc))}</code>"
             )
         return
