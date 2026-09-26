@@ -180,6 +180,16 @@ function orderActionHtml(r){
  if(r.status==='completed'&&r.kind==='new'&&can('manage_pasarguard'))actions.push('صدور مجدد');
  return actions.length?actions.join(' / '):'—'
 }
+async function orderActionMenu(id){
+ const choice=(prompt('عملیات: approve / reject / cancel / fulfill / reissue','')||'').trim().toLowerCase();
+ if(!choice)return;
+ const map={approve:'approve-manual',reject:'reject-payment',cancel:'cancel',fulfill:'fulfill',reissue:'reissue-credentials'};
+ const endpoint=map[choice];
+ if(!endpoint){alert('عملیات معتبر نیست');return}
+ const result=await api('/admin/orders/'+id+'/'+endpoint,{method:'POST'});
+ alert(result.success===false?'عملیات کامل نشد':'عملیات انجام شد');
+ show('orders')
+}
 async function blockCustomer(id,blocked){await api('/admin/customers/'+id+'/block',{method:'PATCH',body:JSON.stringify({blocked})});show('customers')}
 async function walletCredit(id){
  const wallet=await api('/admin/customers/'+id+'/wallet');
