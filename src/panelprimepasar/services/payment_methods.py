@@ -19,7 +19,6 @@ from panelprimepasar.payments.base import (
     ExternalPaymentStatus,
     PaymentIntent,
     PaymentProvider,
-    PaymentProviderError,
 )
 from panelprimepasar.payments.providers import (
     IDPayProvider,
