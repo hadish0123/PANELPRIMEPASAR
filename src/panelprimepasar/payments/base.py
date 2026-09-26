@@ -10,6 +10,10 @@ class ExternalPaymentStatus(StrEnum):
     FAILED = "failed"
 
 
+class PaymentProviderError(RuntimeError):
+    """Raised when an external payment provider cannot complete an operation."""
+
+
 @dataclass(frozen=True, slots=True)
 class PaymentIntent:
     provider: str
@@ -39,10 +43,17 @@ class PaymentProvider(Protocol):
         order_id: UUID,
         amount: int,
         currency: str,
+        callback_url: str,
+        description: str,
     ) -> PaymentIntent: ...
 
     async def verify(
         self,
         *,
+        order_id: UUID,
         reference: str,
+        amount: int,
+        currency: str,
     ) -> PaymentVerification: ...
+
+    async def close(self) -> None: ...
