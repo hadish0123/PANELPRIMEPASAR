@@ -12,6 +12,7 @@ from panelprimepasar.routers import (
     admin_router,
     customer_router,
     discounts_router,
+    payments_router,
     services_router,
     support_router,
     wallet_router,
@@ -31,6 +32,7 @@ def build_dispatcher(settings: Settings) -> Dispatcher:
     for customer_scope in (
         customer_router,
         discounts_router,
+        payments_router,
         services_router,
         support_router,
         wallet_router,
@@ -42,6 +44,7 @@ def build_dispatcher(settings: Settings) -> Dispatcher:
     dispatcher.include_router(admin_ops_router)
     dispatcher.include_router(customer_router)
     dispatcher.include_router(discounts_router)
+    dispatcher.include_router(payments_router)
     dispatcher.include_router(services_router)
     dispatcher.include_router(wallet_router)
     dispatcher.include_router(support_router)
