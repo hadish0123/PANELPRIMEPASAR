@@ -58,9 +58,9 @@ class PaymentMethodInput:
 
 def normalize_payment_slug(value: str) -> str:
     slug = value.strip().casefold()
-    if len(slug) < 2 or len(slug) > 32:
+    if len(slug) < 2 or len(slug) > 24:
         raise PaymentMethodStateError(
-            "Payment method slug must be between 2 and 32 characters"
+            "Payment method slug must be between 2 and 24 characters"
         )
     if not all(ch.isalnum() or ch in {"_", "-"} for ch in slug):
         raise PaymentMethodStateError(
