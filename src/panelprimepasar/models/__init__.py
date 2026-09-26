@@ -15,6 +15,8 @@ from panelprimepasar.models.domain import (
 from panelprimepasar.models.product import (
     DiscountCode,
     DiscountKind,
+    DiscountRedemption,
+    DiscountRedemptionStatus,
     PasarGuardInstance,
     StaffAdmin,
     Subscription,
@@ -33,6 +35,8 @@ __all__ = [
     "Customer",
     "DiscountCode",
     "DiscountKind",
+    "DiscountRedemption",
+    "DiscountRedemptionStatus",
     "Order",
     "OrderKind",
     "OrderStatus",
