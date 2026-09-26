@@ -104,6 +104,28 @@ app.include_router(admin_ui_router)
 app.include_router(payment_callback_router)
 
 
+@app.middleware("http")
+async def admin_session_cookie_auth(
+    request: Request,
+    call_next,
+):
+    if (
+        request.url.path.startswith("/admin")
+        and request.headers.get("authorization") is None
+    ):
+        token = request.cookies.get("panelprimepasar_admin_session")
+        if token:
+            headers = list(request.scope.get("headers", []))
+            headers.append(
+                (
+                    b"authorization",
+                    f"Bearer {token}".encode("utf-8"),
+                )
+            )
+            request.scope["headers"] = headers
+    return await call_next(request)
+
+
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
