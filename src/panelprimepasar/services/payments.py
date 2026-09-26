@@ -10,6 +10,11 @@ from panelprimepasar.models import (
     Payment,
     PaymentStatus,
 )
+from panelprimepasar.services.discounts import (
+    DiscountStateError,
+    redeem_discount_for_order,
+    release_discount_for_order,
+)
 
 
 class PaymentStateError(RuntimeError):
@@ -107,6 +112,14 @@ async def verify_payment(
         or order.currency.upper() != expected_currency
     ):
         raise PaymentStateError("Verified payment currency does not match the order")
+
+    try:
+        await redeem_discount_for_order(
+            session,
+            order_id=order.id,
+        )
+    except DiscountStateError as exc:
+        raise PaymentStateError(str(exc)) from exc
 
     payment.provider_transaction_id = provider_transaction_id
     payment.status = PaymentStatus.VERIFIED
@@ -246,6 +259,14 @@ async def cancel_unpaid_order(
             f"Order status {order.status.value!r} cannot be canceled"
         )
 
+    try:
+        await release_discount_for_order(
+            session,
+            order_id=order.id,
+        )
+    except DiscountStateError as exc:
+        raise PaymentStateError(str(exc)) from exc
+
     order.status = OrderStatus.CANCELED
     pending_payments = list(
         (
@@ -264,3 +285,75 @@ async def cancel_unpaid_order(
 
     await session.flush()
     return order
+
+
+
+async def settle_zero_price_order(
+    session: AsyncSession,
+    *,
+    order_id: UUID,
+) -> Payment:
+    order = await session.scalar(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    if order is None:
+        raise PaymentStateError("Order not found")
+
+    verified = await session.scalar(
+        select(Payment)
+        .where(
+            Payment.order_id == order.id,
+            Payment.status == PaymentStatus.VERIFIED,
+        )
+        .order_by(Payment.verified_at.desc())
+    )
+    if verified is not None:
+        return verified
+
+    if order.status not in {
+        OrderStatus.PENDING,
+        OrderStatus.AWAITING_PAYMENT,
+    }:
+        raise PaymentStateError(
+            f"Order status {order.status.value!r} cannot be settled"
+        )
+    if order.price_amount != 0:
+        raise PaymentStateError("Only zero-price orders can be settled without payment")
+
+    try:
+        await redeem_discount_for_order(
+            session,
+            order_id=order.id,
+        )
+    except DiscountStateError as exc:
+        raise PaymentStateError(str(exc)) from exc
+
+    pending_payments = list(
+        (
+            await session.scalars(
+                select(Payment)
+                .where(
+                    Payment.order_id == order.id,
+                    Payment.status == PaymentStatus.PENDING,
+                )
+                .with_for_update()
+            )
+        ).all()
+    )
+    for pending in pending_payments:
+        pending.status = PaymentStatus.FAILED
+
+    payment = Payment(
+        order_id=order.id,
+        provider="discount",
+        provider_transaction_id=f"discount:{order.id}",
+        amount=0,
+        currency=order.currency,
+        status=PaymentStatus.VERIFIED,
+        verified_at=datetime.now(UTC),
+        raw_reference="zero-price-order",
+    )
+    session.add(payment)
+    order.status = OrderStatus.PAID
+    await session.flush()
+    return payment
