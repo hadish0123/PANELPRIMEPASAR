@@ -243,6 +243,10 @@ class ProvisioningService:
         )
         if order is None:
             raise ProvisioningStateError("Order not found")
+        if order.kind != OrderKind.NEW:
+            raise ProvisioningStateError(
+                f"Order kind {order.kind.value!r} must use subscription lifecycle provisioning"
+            )
 
         customer = await session.scalar(
             select(Customer).where(Customer.id == order.customer_id)
