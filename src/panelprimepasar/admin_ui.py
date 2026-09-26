@@ -432,28 +432,28 @@ td{color:#394457}
       <div>ورود امن با نشست امضاشده و سطح دسترسی مبتنی بر نقش. اطلاعات حساس در رابط مدیریت نمایش داده نمی‌شوند.</div>
     </div>
   </div>
-  <div class="login-form">
+  <form class="login-form" method="post" action="/admin/auth/login-form">
     <div class="section-eyebrow">Secure Access</div>
     <h1>ورود به پنل مدیریت</h1>
     <p class="lead">برای ورود از حساب مدیریتی خود استفاده کنید.</p>
     <div class="field-group">
       <div class="field">
         <label for="username">نام کاربری</label>
-        <input id="username" autocomplete="username" placeholder="نام کاربری مدیریت">
+        <input id="username" name="username" autocomplete="username" placeholder="نام کاربری مدیریت">
       </div>
       <div class="field">
         <label for="password">رمز عبور</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور">
+        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="رمز عبور">
       </div>
     </div>
-    <button class="btn" onclick="login()" style="margin-top:16px">ورود امن</button>
+    <button class="btn" type="submit" style="margin-top:16px">ورود امن</button>
     <div class="divider">ورود اضطراری Owner</div>
     <div class="field">
       <label for="ownerKey">کلید مدیریت</label>
-      <input id="ownerKey" type="password" autocomplete="off" placeholder="ADMIN_PANEL_API_KEY">
+      <input id="ownerKey" name="api_key" type="password" autocomplete="off" placeholder="ADMIN_PANEL_API_KEY">
     </div>
     <div id="loginError"></div>
-  </div>
+  </form>
 </section>
 
 <section id="app" class="hidden">
@@ -557,7 +557,11 @@ async function login(){
     $('#loginError').textContent=e.message
   }
 }
-function logout(){sessionStorage.clear();location.reload()}
+async function logout(){
+  try{await fetch('/admin/auth/logout',{method:'POST'})}catch{}
+  sessionStorage.clear();
+  location.href='/admin/ui'
+}
 function table(rows,cols){
   if(!rows.length)return '<div class="empty-state">داده‌ای برای نمایش وجود ندارد.</div>';
   return '<div class="table-wrap"><table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+
@@ -740,7 +744,27 @@ async function checkPasarguards(){
  show('pasarguardInstances')
 }
 async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
-if(token()){api('/admin/auth/me').then(me=>{sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));$('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')}).catch(()=>sessionStorage.clear())}
+async function restoreSession(){
+  const params=new URLSearchParams(location.search);
+  if(params.get('login_error')==='1'){
+    $('#loginError').textContent='نام کاربری یا رمز عبور صحیح نیست.';
+  }
+  try{
+    const headers={};
+    if(token())headers['Authorization']='Bearer '+token();
+    const response=await fetch('/admin/auth/me',{headers});
+    if(!response.ok)return;
+    const me=await response.json();
+    sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));
+    sessionStorage.setItem('adminRole',me.role||'');
+    $('#login').classList.add('hidden');
+    $('#app').classList.remove('hidden');
+    applyPermissions();
+    show('dashboard');
+    if(location.search)history.replaceState({},'',location.pathname);
+  }catch{}
+}
+restoreSession()
 </script>
 </body>
 </html>"""
