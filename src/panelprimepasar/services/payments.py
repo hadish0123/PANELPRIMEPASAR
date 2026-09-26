@@ -241,7 +241,6 @@ async def cancel_unpaid_order(
     if order.status not in {
         OrderStatus.PENDING,
         OrderStatus.AWAITING_PAYMENT,
-        OrderStatus.FAILED,
     }:
         raise PaymentStateError(
             f"Order status {order.status.value!r} cannot be canceled"
