@@ -34,6 +34,27 @@ def test_plan_form_uses_gigabytes_without_day_limit() -> None:
     assert 'id="pdays"' not in _ADMIN_JS
 
 
+def test_plan_actions_offer_safe_permanent_deletion() -> None:
+    assert 'onclick="deletePlan(' in _ADMIN_JS
+    assert 'class="btn small danger"' in _ADMIN_JS
+    assert "async function deletePlan(id,button)" in _ADMIN_JS
+    assert "method:'DELETE'" in _ADMIN_JS
+    assert "پلن دارای سفارش یا سرویس قابل حذف نیست" in _ADMIN_JS
+
+
+def test_payment_method_fields_open_only_after_their_choice() -> None:
+    assert 'data-payment-category="card"' in _ADMIN_JS
+    assert 'data-payment-category="gateway"' in _ADMIN_JS
+    assert "function selectPaymentCategory(category,button)" in _ADMIN_JS
+    assert "function selectPaymentKind(kind,button)" in _ADMIN_JS
+    assert "paymentMethodFields('manual_card')" in _ADMIN_JS
+    assert "selectPaymentKind(\\'zarinpal\\'" in _ADMIN_JS
+    assert "selectPaymentKind(\\'idpay\\'" in _ADMIN_JS
+    assert "selectPaymentKind(\\'zibal\\'" in _ADMIN_JS
+    assert "selectPaymentKind(\\'nextpay\\'" in _ADMIN_JS
+    assert '<select id="pmKind">' not in _ADMIN_JS
+
+
 def test_completed_orders_offer_quota_sync_without_password_rotation() -> None:
     assert "actions.push('همگام‌سازی حجم / صدور مجدد')" in _ADMIN_JS
     assert "sync:'fulfill'" in _ADMIN_JS

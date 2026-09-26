@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from pydantic import AnyHttpUrl, BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.config import Settings, get_settings
@@ -991,13 +992,13 @@ async def update_plan(
 
 
 @router.delete("/plans/{plan_id}")
-async def archive_plan(
+async def delete_plan(
     plan_id: UUID,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
     authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    await _require_web_permission(
+    principal = await _require_web_permission(
         session,
         api_key=x_admin_key,
         authorization=authorization,
@@ -1007,9 +1008,48 @@ async def archive_plan(
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    plan.is_active = False
-    await session.commit()
-    return {"id": str(plan.id), "active": False}
+    order_reference = await session.scalar(
+        select(Order.id).where(Order.plan_id == plan.id).limit(1)
+    )
+    subscription_reference = await session.scalar(
+        select(Subscription.id).where(Subscription.plan_id == plan.id).limit(1)
+    )
+    if order_reference is not None or subscription_reference is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "این پلن سابقه سفارش یا سرویس دارد و قابل حذف نیست؛ "
+                "برای پنهان‌کردن آن، پلن را غیرفعال کنید."
+            ),
+        )
+
+    plan_id_text = str(plan.id)
+    try:
+        await session.delete(plan)
+        await record_audit_event(
+            session,
+            actor_type="web_admin",
+            actor_id=(
+                str(principal.staff_id)
+                if principal.staff_id is not None
+                else "owner"
+            ),
+            action="plan.deleted",
+            entity_type="plan",
+            entity_id=plan_id_text,
+            metadata={"name": plan.name},
+        )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "این پلن هم‌اکنون در یک سفارش یا سرویس استفاده می‌شود و "
+                "قابل حذف نیست."
+            ),
+        ) from exc
+    return {"id": plan_id_text, "deleted": True}
 
 
 @router.get("/orders")

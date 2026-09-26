@@ -356,6 +356,26 @@ label{color:var(--text-soft);font-size:12px}
   border-color:#e9c3c6!important;
 }
 .btn.danger:hover,.nav .danger:hover{background:#ffe5e6!important}
+.payment-category-picker,.payment-provider-picker{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
+  margin-top:14px;
+}
+.payment-choice{
+  min-height:52px;margin:0;padding:11px 14px;border:1px solid #ded4c4;
+  border-radius:12px;background:#fffdfa;color:var(--text);cursor:pointer;
+  font-weight:800;transition:.17s ease;box-shadow:var(--shadow-soft);
+}
+.payment-choice:hover{transform:translateY(-1px);border-color:#c49a4d;background:#fff9ed}
+.payment-choice.is-active{
+  color:#684817;border-color:#c49a4d;background:linear-gradient(180deg,#f8e8c6,#efdab0);
+  box-shadow:0 0 0 3px rgba(196,154,77,.12);
+}
+.payment-provider-picker{padding-top:2px}
+.payment-form-panel{
+  margin-top:14px;padding:15px;border:1px solid #e7ddce;border-radius:12px;
+  background:rgba(255,253,248,.78);
+}
+.payment-form-panel h3{margin-bottom:4px}
 .table-wrap{
   width:100%;
   overflow:auto;
@@ -420,6 +440,7 @@ td{color:#394457}
 }
 @media(max-width:560px){
   .grid{grid-template-columns:1fr}
+  .payment-category-picker,.payment-provider-picker{grid-template-columns:1fr}
   .card{padding:14px}
   .login-form{padding:30px 22px}
   .login-form h1{font-size:26px}
@@ -672,7 +693,7 @@ const views={
  },
  plans:async()=>{
   const rows=await api('/admin/plans');
-  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" maxlength="128" placeholder="نام"><input id="pquota" type="number" min="0" step="0.01" inputmode="decimal" placeholder="حجم (گیگابایت، ۰ = نامحدود)"><input id="pprice" type="number" min="0" inputmode="numeric" placeholder="قیمت تومان"><button type="button" class="btn small" onclick="createPlan(this)">➕ ساخت</button></div><p class="muted">حجم را به گیگابایت وارد کنید. عدد صفر یعنی حجم نامحدود.</p></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم (GB)',r=>formatQuotaGb(r.quota_bytes)],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
+  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" maxlength="128" placeholder="نام"><input id="pquota" type="number" min="0" step="0.01" inputmode="decimal" placeholder="حجم (گیگابایت، ۰ = نامحدود)"><input id="pprice" type="number" min="0" inputmode="numeric" placeholder="قیمت تومان"><button type="button" class="btn small" onclick="createPlan(this)">➕ ساخت</button></div><p class="muted">حجم را به گیگابایت وارد کنید. عدد صفر یعنی حجم نامحدود.</p></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم (GB)',r=>formatQuotaGb(r.quota_bytes)],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button><button type="button" class="btn small danger" onclick="deletePlan(\''+r.id+'\',this)">🗑 حذف</button>']])
  },
  discounts:async()=>{
   const rows=await api('/admin/discounts');
@@ -682,18 +703,11 @@ const views={
  payments:async()=>{const rows=await api('/admin/payments?limit=100');$('#view').innerHTML='<h1>پرداخت‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['درگاه',r=>esc(r.provider)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>esc(r.status)],['تراکنش',r=>esc(r.transaction_id)]])},
  paymentMethods:async()=>{
   const rows=await api('/admin/payment-methods');
-  const form='<div class="card"><h2>افزودن روش پرداخت</h2><div class="toolbar">'+
-   '<input id="pmSlug" maxlength="24" autocapitalize="none" placeholder="شناسه کوتاه مثل zarinpal">'+
-   '<input id="pmName" maxlength="128" placeholder="نام نمایشی">'+
-   '<select id="pmKind"><option value="manual_card">کارت‌به‌کارت</option><option value="zarinpal">زرین‌پال</option><option value="idpay">IDPay</option><option value="zibal">زیبال</option><option value="nextpay">NextPay</option></select>'+
-   '<input id="pmSecret" type="password" autocomplete="new-password" placeholder="Merchant ID / API Key">'+
-   '<input id="pmCard" inputmode="numeric" maxlength="19" placeholder="شماره کارت (کارت‌به‌کارت)">'+
-   '<input id="pmHolder" placeholder="نام صاحب کارت">'+
-   '<input id="pmBank" placeholder="بانک">'+
-   '<input id="pmIban" placeholder="شبا (اختیاری)">'+
-   '<label><input id="pmSandbox" type="checkbox"> تست/Sandbox</label>'+
-   '<label><input id="pmEnabled" type="checkbox"> فعال</label>'+
-   '<button type="button" class="btn small" onclick="createPaymentMethod(this)">➕ ذخیره</button></div>'+
+  const form='<div class="card"><h2>افزودن روش پرداخت</h2><p class="muted">ابتدا نوع روش پرداخت را انتخاب کنید.</p>'+
+   '<div class="payment-category-picker" role="group" aria-label="نوع روش پرداخت">'+
+   '<button type="button" class="payment-choice" data-payment-category="card" aria-pressed="false" onclick="selectPaymentCategory(\'card\',this)">💳 شماره کارت</button>'+
+   '<button type="button" class="payment-choice" data-payment-category="gateway" aria-pressed="false" onclick="selectPaymentCategory(\'gateway\',this)">🌐 درگاه پرداخت</button></div>'+
+   '<div id="paymentProviderPicker"></div><div id="paymentMethodForm" aria-live="polite"><div class="empty-state">یک گزینه را انتخاب کنید تا تنظیمات همان روش نمایش داده شود.</div></div>'+
    '<p class="muted">اطلاعات محرمانه در پاسخ API نمایش داده نمی‌شود و با کلید PAYMENT_CREDENTIALS_MASTER_KEY رمزگذاری می‌شود.</p></div>';
   $('#view').innerHTML='<h1>روش‌های پرداخت</h1>'+form+table(rows,[['نام',r=>esc(r.display_name)],['نوع',r=>esc(r.kind)],['شناسه',r=>'<code>'+esc(r.slug)+'</code>'],['حالت',r=>r.sandbox?'🧪 تست':'واقعی'],['اعتبارنامه',r=>r.kind==='manual_card'?'—':(r.credentials_configured?'✅ تنظیم شده':'❌ ناقص')],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePaymentMethod(\''+r.id+'\','+(!r.enabled)+',this)">'+(r.enabled?'غیرفعال':'فعال')+'</button><button type="button" class="btn small" onclick="editPaymentMethod(\''+r.id+'\',this)">✏️ ویرایش</button>']])
  },
@@ -798,6 +812,13 @@ async function togglePlan(id,active,button){
    await show('plans')
  },active?'پلن فعال شد.':'پلن غیرفعال شد.')
 }
+async function deletePlan(id,button){
+ if(!confirm('این پلن برای همیشه حذف شود؟ پلن دارای سفارش یا سرویس قابل حذف نیست.'))return;
+ await runAction(button,async()=>{
+   await api('/admin/plans/'+id,{method:'DELETE'});
+   await show('plans')
+ },'پلن حذف شد.')
+}
 async function createPlan(button){
  await runAction(button,async()=>{
    const body={
@@ -833,15 +854,59 @@ function paymentCredential(kind,value){
  if(kind==='zibal')return {merchant:value};
  return {api_key:value};
 }
+const paymentKindMeta={
+ manual_card:{name:'کارت‌به‌کارت',slug:'card',secret:''},
+ zarinpal:{name:'زرین‌پال',slug:'zarinpal',secret:'Merchant ID زرین‌پال'},
+ idpay:{name:'آیدی‌پی',slug:'idpay',secret:'API Key آیدی‌پی'},
+ zibal:{name:'زیبال',slug:'zibal',secret:'Merchant زیبال'},
+ nextpay:{name:'نکست‌پی',slug:'nextpay',secret:'API Key نکست‌پی'}
+};
+function paymentMethodFields(kind){
+ const meta=paymentKindMeta[kind];
+ if(!meta)return '<div class="empty-state">روش پرداخت معتبر نیست.</div>';
+ const common='<input id="pmKind" type="hidden" value="'+esc(kind)+'">'+
+  '<input id="pmSlug" maxlength="24" autocapitalize="none" value="'+esc(meta.slug)+'" placeholder="شناسه کوتاه">'+
+  '<input id="pmName" maxlength="128" value="'+esc(meta.name)+'" placeholder="نام نمایشی">';
+ const enabled='<label><input id="pmEnabled" type="checkbox"> فعال</label>'+
+  '<button type="button" class="btn small" onclick="createPaymentMethod(this)">➕ ذخیره '+esc(meta.name)+'</button>';
+ if(kind==='manual_card')return '<div class="payment-form-panel"><h3>تنظیمات شماره کارت</h3><div class="toolbar">'+common+
+  '<input id="pmCard" inputmode="numeric" maxlength="19" autocomplete="cc-number" placeholder="شماره کارت ۱۶ رقمی">'+
+  '<input id="pmHolder" autocomplete="cc-name" placeholder="نام صاحب کارت">'+
+  '<input id="pmBank" placeholder="نام بانک (اختیاری)">'+
+  '<input id="pmIban" placeholder="شماره شبا (اختیاری)">'+enabled+'</div></div>';
+ const sandbox=kind==='nextpay'?'':'<label><input id="pmSandbox" type="checkbox"> تست / Sandbox</label>';
+ return '<div class="payment-form-panel"><h3>تنظیمات '+esc(meta.name)+'</h3><div class="toolbar">'+common+
+  '<input id="pmSecret" type="password" autocomplete="new-password" placeholder="'+esc(meta.secret)+'">'+sandbox+enabled+'</div></div>'
+}
+function selectPaymentCategory(category,button){
+ document.querySelectorAll('[data-payment-category]').forEach(item=>{
+   const active=item===button;item.classList.toggle('is-active',active);item.setAttribute('aria-pressed',String(active))
+ });
+ const providers=$('#paymentProviderPicker'),form=$('#paymentMethodForm');
+ if(category==='card'){
+   providers.innerHTML='';form.innerHTML=paymentMethodFields('manual_card');return
+ }
+ providers.innerHTML='<div class="payment-provider-picker" role="group" aria-label="انتخاب درگاه">'+
+  '<button type="button" class="payment-choice" onclick="selectPaymentKind(\'zarinpal\',this)">زرین‌پال</button>'+
+  '<button type="button" class="payment-choice" onclick="selectPaymentKind(\'idpay\',this)">آیدی‌پی</button>'+
+  '<button type="button" class="payment-choice" onclick="selectPaymentKind(\'zibal\',this)">زیبال</button>'+
+  '<button type="button" class="payment-choice" onclick="selectPaymentKind(\'nextpay\',this)">نکست‌پی</button></div>';
+ form.innerHTML='<div class="empty-state">درگاه موردنظر را انتخاب کنید.</div>'
+}
+function selectPaymentKind(kind,button){
+ if(!paymentKindMeta[kind]||kind==='manual_card')return;
+ document.querySelectorAll('.payment-provider-picker .payment-choice').forEach(item=>item.classList.toggle('is-active',item===button));
+ $('#paymentMethodForm').innerHTML=paymentMethodFields(kind)
+}
 async function createPaymentMethod(button){
  await runAction(button,async()=>{
    const kind=$('#pmKind').value;
    const slug=requiredText('#pmSlug','شناسه روش پرداخت',2,24).toLowerCase();
    if(!/^[a-z0-9_-]+$/.test(slug))throw new Error('شناسه فقط می‌تواند شامل حروف انگلیسی، عدد، خط تیره و زیرخط باشد.');
    const displayName=requiredText('#pmName','نام نمایشی',1,128);
-   const sandbox=$('#pmSandbox').checked;
+   const sandbox=$('#pmSandbox')?.checked||false;
    const publicConfig={};
-   let secret=$('#pmSecret').value.trim();
+   let secret=$('#pmSecret')?.value.trim()||'';
    if(kind==='manual_card'){
      const card=$('#pmCard').value.replace(/[\s-]/g,'');
      if(!/^\d{16}$/.test(card))throw new Error('شماره کارت باید دقیقاً ۱۶ رقم باشد.');
@@ -856,7 +921,7 @@ async function createPaymentMethod(button){
    }
    const body={slug,kind,display_name:displayName,is_enabled:$('#pmEnabled').checked,sandbox,sort_order:0,public_config:publicConfig,credentials:paymentCredential(kind,secret)};
    await api('/admin/payment-methods',{method:'POST',body:JSON.stringify(body)});
-   $('#pmSecret').value='';
+   if($('#pmSecret'))$('#pmSecret').value='';
    await show('paymentMethods')
  },'روش پرداخت ذخیره شد.')
 }
