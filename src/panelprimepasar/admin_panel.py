@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.config import Settings, get_settings
 from panelprimepasar.db import get_session
+from panelprimepasar.integrations.pasarguard import PasarGuardError
 from panelprimepasar.models import (
     AuditEvent,
     Customer,
