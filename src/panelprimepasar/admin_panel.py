@@ -1,7 +1,7 @@
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.config import get_settings
@@ -52,14 +52,33 @@ async def dashboard(
 async def customers(
     x_admin_key: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
-) -> list[dict[str, str | int]]:
+    search: str | None = Query(default=None, max_length=128),
+    blocked: bool | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=100),
+) -> list[dict[str, str | int | bool]]:
     _check_admin_key(x_admin_key)
-    rows = (await session.scalars(select(Customer).order_by(Customer.created_at.desc()).limit(100))).all()
+    query = select(Customer)
+    if blocked is not None:
+        query = query.where(Customer.is_blocked == blocked)
+    if search:
+        term = search.strip()
+        if term:
+            literal = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            conditions = [Customer.telegram_username.ilike(f"%{literal}%", escape="\\")]
+            if term.isdecimal() and len(term) <= 19:
+                conditions.append(Customer.telegram_user_id == int(term))
+            query = query.where(or_(*conditions))
+    rows = (await session.scalars(
+        query.order_by(Customer.created_at.desc(), Customer.id.desc())
+        .offset(offset).limit(limit)
+    )).all()
     return [
         {
             "id": str(row.id),
             "telegram_user_id": row.telegram_user_id,
             "username": row.telegram_username or "",
+            "blocked": row.is_blocked,
         }
         for row in rows
     ]
@@ -88,9 +107,18 @@ async def plans(
 async def orders(
     x_admin_key: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
+    order_status: OrderStatus | None = Query(default=None, alias="status"),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=100),
 ) -> list[dict[str, str | int]]:
     _check_admin_key(x_admin_key)
-    rows = (await session.scalars(select(Order).order_by(Order.created_at.desc()).limit(100))).all()
+    query = select(Order)
+    if order_status is not None:
+        query = query.where(Order.status == order_status)
+    rows = (await session.scalars(
+        query.order_by(Order.created_at.desc(), Order.id.desc())
+        .offset(offset).limit(limit)
+    )).all()
     return [
         {
             "id": str(row.id),

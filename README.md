@@ -138,6 +138,12 @@ The admin UI supports:
 - credential rotation/reissue
 - read-only PasarGuard diagnostics
 
+The read-only admin API accepts `X-Admin-Key`. `GET /admin/customers` supports
+`search` (Telegram username or exact numeric Telegram ID), `blocked`, `offset`,
+and `limit`. `GET /admin/orders` supports `status`, `offset`, and `limit`.
+Both endpoints keep their existing list response format; pagination defaults to
+100 records and caps each request at 100. Invalid filters return HTTP 422.
+
 ## Documentation
 
 - `docs/architecture.md`
