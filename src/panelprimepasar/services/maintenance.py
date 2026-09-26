@@ -24,6 +24,7 @@ from panelprimepasar.models import (
     SubscriptionStatus,
 )
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.discounts import release_stale_discount_reservations
 
 
 class MaintenanceClient(Protocol):
@@ -258,6 +259,23 @@ async def run_subscription_maintenance_once(
     settings: Settings,
     bot: Bot | None,
 ) -> None:
+    async with session_factory() as session:
+        released_discounts = await release_stale_discount_reservations(
+            session,
+            max_age_hours=settings.discount_reservation_max_age_hours,
+        )
+        if released_discounts:
+            await record_audit_event(
+                session,
+                actor_type="system",
+                actor_id=None,
+                action="discount.stale_reservations_released",
+                entity_type="discount_redemption",
+                entity_id=None,
+                metadata={"count": released_discounts},
+            )
+        await session.commit()
+
     try:
         client = build_pasarguard_client(settings)
     except PasarGuardConfigurationError:
