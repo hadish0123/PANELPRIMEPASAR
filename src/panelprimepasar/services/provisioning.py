@@ -151,7 +151,7 @@ class ProvisioningService:
         *,
         admin_id: int,
         order_id: UUID,
-    ) -> Select[tuple[PasarGuardAccount]]:
+    ) -> Select[PasarGuardAccount]:
         query = select(PasarGuardAccount).where(
             PasarGuardAccount.pasarguard_admin_id == admin_id,
             PasarGuardAccount.order_id != order_id,
