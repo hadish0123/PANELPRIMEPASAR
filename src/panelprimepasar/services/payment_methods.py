@@ -166,6 +166,10 @@ def _validate_credentials(
     elif kind == PaymentMethodKind.ZIBAL and not sandbox:
         required = "merchant"
     elif kind == PaymentMethodKind.NEXTPAY:
+        if sandbox:
+            raise PaymentMethodStateError(
+                "NextPay sandbox mode is not supported by this integration"
+            )
         required = "api_key"
 
     if required is not None and not normalized.get(required):
@@ -242,14 +246,32 @@ async def configure_payment_method(
         if method_id is not None
         else None
     )
-    duplicate = await session.scalar(
-        select(PaymentMethodConfig).where(
-            PaymentMethodConfig.slug == slug,
-            PaymentMethodConfig.id != method_id if method_id is not None else True,
-        )
+    duplicate_query = select(PaymentMethodConfig).where(
+        PaymentMethodConfig.slug == slug
     )
+    if method_id is not None:
+        duplicate_query = duplicate_query.where(
+            PaymentMethodConfig.id != method_id
+        )
+    duplicate = await session.scalar(duplicate_query)
     if duplicate is not None:
         raise PaymentMethodStateError("Payment method slug already exists")
+
+    if (
+        values.is_enabled
+        and values.kind != PaymentMethodKind.MANUAL_CARD
+    ):
+        payment_callback_base_url(settings)
+
+    if (
+        method is not None
+        and method.kind != values.kind.value
+        and values.credentials is None
+        and values.kind != PaymentMethodKind.MANUAL_CARD
+    ):
+        raise PaymentMethodStateError(
+            "Credentials are required when changing gateway kind"
+        )
 
     encrypted_credentials: str | None
     if values.kind == PaymentMethodKind.MANUAL_CARD:
