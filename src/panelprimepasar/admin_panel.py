@@ -1,5 +1,6 @@
 import secrets
 from dataclasses import dataclass
+from html import escape
 from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
@@ -56,7 +57,10 @@ from panelprimepasar.services.discounts import (
 )
 from panelprimepasar.services.fulfillment import FulfillmentOutcome, fulfill_paid_order
 from panelprimepasar.services.panel_urls import resolve_order_panel_url
-from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
+from panelprimepasar.services.pasarguard_instances import (
+    PasarGuardInstanceRouter,
+    PasarGuardTarget,
+)
 from panelprimepasar.services.payment_methods import (
     PaymentMethodInput,
     PaymentMethodStateError,
@@ -323,9 +327,9 @@ async def _notify_order_fulfillment(
             await bot.send_message(
                 customer.telegram_user_id,
                 "<b>پنل نمایندگی شما آماده است.</b>\n\n"
-                f"آدرس پنل: <code>{panel_url}</code>\n"
-                f"نام کاربری: <code>{outcome.credentials.username}</code>\n"
-                f"رمز عبور: <code>{outcome.credentials.password}</code>\n\n"
+                f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
+                f"نام کاربری: <code>{escape(outcome.credentials.username)}</code>\n"
+                f"رمز عبور: <code>{escape(outcome.credentials.password)}</code>\n\n"
                 "رمز را در محل امن نگه‌داری کنید.",
             )
         else:
@@ -1225,6 +1229,7 @@ async def reissue_order_credentials_web(
 
     settings = get_settings()
     instance_router = PasarGuardInstanceRouter(settings=settings)
+    target: PasarGuardTarget | None = None
     try:
         target = await instance_router.target_for_account(
             session,
@@ -1244,7 +1249,7 @@ async def reissue_order_credentials_web(
         await session.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     finally:
-        if "target" in locals():
+        if target is not None:
             await target.client.close()
 
     await record_audit_event(
@@ -1279,9 +1284,9 @@ async def reissue_order_credentials_web(
             await bot.send_message(
                 customer.telegram_user_id,
                 "<b>مشخصات ورود جدید پنل نمایندگی</b>\n\n"
-                f"آدرس پنل: <code>{panel_url}</code>\n"
-                f"نام کاربری: <code>{outcome.credentials.username}</code>\n"
-                f"رمز عبور: <code>{outcome.credentials.password}</code>\n\n"
+                f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
+                f"نام کاربری: <code>{escape(outcome.credentials.username)}</code>\n"
+                f"رمز عبور: <code>{escape(outcome.credentials.password)}</code>\n\n"
                 "رمز قبلی دیگر معتبر نیست.",
             )
             delivered = True
