@@ -28,10 +28,7 @@ from panelprimepasar.services.orders import (
     list_customer_orders,
     upsert_customer,
 )
-from panelprimepasar.services.payments import (
-    PaymentStateError,
-    create_pending_payment,
-)
+from panelprimepasar.services.payments import PaymentStateError, create_pending_payment
 
 
 router = Router(name="customer")
@@ -39,7 +36,6 @@ router = Router(name="customer")
 
 class ReceiptForm(StatesGroup):
     waiting_receipt = State()
-
 
 
 def format_money(amount: int, currency: str) -> str:
