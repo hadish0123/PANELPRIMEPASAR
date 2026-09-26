@@ -42,6 +42,7 @@ from panelprimepasar.security import (
     WebAdminSecurityError,
     create_session_token,
     has_permission,
+    verify_password,
     verify_session_token,
 )
 from panelprimepasar.services.admins import (
@@ -227,6 +228,21 @@ def _owner_key_valid(api_key: str | None) -> bool:
         and api_key is not None
         and secrets.compare_digest(api_key, configured.get_secret_value())
     )
+
+
+def _owner_credentials_valid(
+    settings: Settings,
+    *,
+    username: str,
+    password: str,
+) -> bool:
+    configured_username = settings.admin_panel_owner_username
+    configured_hash = settings.admin_panel_owner_password_hash
+    if configured_username is None or configured_hash is None:
+        return False
+    if not secrets.compare_digest(username, configured_username):
+        return False
+    return verify_password(password, configured_hash.get_secret_value())
 
 
 async def _authenticate_web_admin(
@@ -437,6 +453,18 @@ async def admin_login(
         role = AdminRole.OWNER
         staff_id = None
         username = "owner"
+    elif (
+        payload.username is not None
+        and payload.password is not None
+        and _owner_credentials_valid(
+            settings,
+            username=payload.username,
+            password=payload.password,
+        )
+    ):
+        role = AdminRole.OWNER
+        staff_id = None
+        username = payload.username
     elif payload.username is not None and payload.password is not None:
         staff = await authenticate_web_staff(
             session,
