@@ -152,13 +152,12 @@ def verify_session_token(
 
     try:
         role = AdminRole(role_raw)
-        staff_id = (
-            UUID(staff_id_raw)
-            if isinstance(staff_id_raw, str)
-            else None
-            if staff_id_raw is None
-            else (_ for _ in ()).throw(ValueError())
-        )
+        if staff_id_raw is None:
+            staff_id = None
+        elif isinstance(staff_id_raw, str):
+            staff_id = UUID(staff_id_raw)
+        else:
+            raise ValueError
     except ValueError:
         raise WebAdminSecurityError("Invalid session token") from None
 
