@@ -5,6 +5,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 
 from panelprimepasar.config import Settings
 from panelprimepasar.db import SessionFactory
+from panelprimepasar.middlewares.customer_access import CustomerAccessMiddleware
 from panelprimepasar.middlewares.database import DatabaseSessionMiddleware
 from panelprimepasar.routers import (
     admin_ops_router,
@@ -23,6 +24,12 @@ def build_dispatcher(settings: Settings) -> Dispatcher:
     )
     dispatcher = Dispatcher(storage=storage)
     dispatcher.update.outer_middleware(DatabaseSessionMiddleware(SessionFactory))
+
+    customer_access = CustomerAccessMiddleware()
+    for customer_scope in (customer_router, services_router, support_router):
+        customer_scope.message.outer_middleware(customer_access)
+        customer_scope.callback_query.outer_middleware(customer_access)
+
     dispatcher.include_router(admin_router)
     dispatcher.include_router(admin_ops_router)
     dispatcher.include_router(customer_router)
