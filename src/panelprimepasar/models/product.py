@@ -42,6 +42,14 @@ class DiscountRedemptionStatus(StrEnum):
     RELEASED = "released"
 
 
+class PaymentMethodKind(StrEnum):
+    MANUAL_CARD = "manual_card"
+    ZARINPAL = "zarinpal"
+    IDPAY = "idpay"
+    ZIBAL = "zibal"
+    NEXTPAY = "nextpay"
+
+
 class StaffAdmin(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "staff_admins"
 
@@ -163,6 +171,27 @@ class DiscountRedemption(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=DiscountRedemptionStatus.RESERVED.value,
         index=True,
     )
+
+
+class PaymentMethodConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "payment_method_configs"
+
+    slug: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+    )
+    sandbox: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    public_config_json: Mapped[str | None] = mapped_column(Text)
+    secret_config_encrypted: Mapped[str | None] = mapped_column(Text)
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_check_ok: Mapped[bool | None] = mapped_column(Boolean)
+    last_error_message: Mapped[str | None] = mapped_column(Text)
 
 
 class PasarGuardInstance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
