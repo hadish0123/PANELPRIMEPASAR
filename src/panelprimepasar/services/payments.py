@@ -188,3 +188,80 @@ async def approve_manual_order(
         verified_amount=order.price_amount,
         verified_currency=order.currency,
     )
+
+
+async def reject_pending_manual_payment(
+    session: AsyncSession,
+    *,
+    order_id: UUID,
+) -> Payment:
+    order = await session.scalar(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    if order is None:
+        raise PaymentStateError("Order not found")
+    if order.status not in {
+        OrderStatus.PENDING,
+        OrderStatus.AWAITING_PAYMENT,
+    }:
+        raise PaymentStateError(
+            f"Order status {order.status.value!r} cannot reject a payment"
+        )
+
+    payment = await session.scalar(
+        select(Payment)
+        .where(
+            Payment.order_id == order.id,
+            Payment.provider == "manual",
+            Payment.status == PaymentStatus.PENDING,
+        )
+        .order_by(Payment.created_at.desc())
+        .with_for_update()
+    )
+    if payment is None:
+        raise PaymentStateError("No pending manual payment was found")
+
+    payment.status = PaymentStatus.FAILED
+    order.status = OrderStatus.AWAITING_PAYMENT
+    await session.flush()
+    return payment
+
+
+async def cancel_unpaid_order(
+    session: AsyncSession,
+    *,
+    order_id: UUID,
+) -> Order:
+    order = await session.scalar(
+        select(Order).where(Order.id == order_id).with_for_update()
+    )
+    if order is None:
+        raise PaymentStateError("Order not found")
+
+    if order.status not in {
+        OrderStatus.PENDING,
+        OrderStatus.AWAITING_PAYMENT,
+        OrderStatus.FAILED,
+    }:
+        raise PaymentStateError(
+            f"Order status {order.status.value!r} cannot be canceled"
+        )
+
+    order.status = OrderStatus.CANCELED
+    pending_payments = list(
+        (
+            await session.scalars(
+                select(Payment)
+                .where(
+                    Payment.order_id == order.id,
+                    Payment.status == PaymentStatus.PENDING,
+                )
+                .with_for_update()
+            )
+        ).all()
+    )
+    for payment in pending_payments:
+        payment.status = PaymentStatus.FAILED
+
+    await session.flush()
+    return order
