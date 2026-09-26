@@ -11,60 +11,495 @@ _ADMIN_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PANELPRIMEPASAR Admin</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1020;--panel:#121a2d;--line:#25304a;--text:#f2f6ff;--muted:#9aa9c3;--accent:#66e3b4;--danger:#ff6b7a}
-*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
-header{position:sticky;top:0;background:#0d1426;border-bottom:1px solid var(--line);padding:14px 20px;z-index:2}
-.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh}.side{border-left:1px solid var(--line);padding:18px;background:#0d1426}
-main{padding:24px;min-width:0}.nav button,.btn{width:100%;margin:5px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);cursor:pointer;text-align:right}
-.nav button:hover,.btn:hover{border-color:var(--accent)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}.metric{font-size:24px;font-weight:700;margin-top:8px}
-table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-th,td{padding:10px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:var(--muted)}
-.table-wrap{overflow:auto}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px}
-.small{width:auto!important}.danger{border-color:#6a2d37!important;color:#ffc5cb!important}.ok{color:var(--accent)}.muted{color:var(--muted)}
-#login{max-width:460px;margin:12vh auto}.hidden{display:none!important}h1,h2{margin-top:0}
-@media(max-width:800px){.shell{grid-template-columns:1fr}.side{border-left:0;border-bottom:1px solid var(--line)}.nav{display:flex;gap:6px;overflow:auto}.nav button{min-width:130px}}
+:root{
+  color-scheme:dark;
+  --bg:#07090f;
+  --bg-soft:#0a0d14;
+  --panel:#10141d;
+  --panel-2:#141a25;
+  --panel-3:#191f2b;
+  --line:#252c3a;
+  --line-soft:#1b2230;
+  --text:#f7f3e8;
+  --text-soft:#d8d1bf;
+  --muted:#8d95a5;
+  --gold:#d6b46f;
+  --gold-strong:#f0cf8e;
+  --gold-dim:#8f7442;
+  --blue:#5b8cff;
+  --success:#5dc69a;
+  --danger:#ef7b83;
+  --warning:#e5b763;
+  --shadow:0 24px 80px rgba(0,0,0,.42);
+  --shadow-soft:0 12px 34px rgba(0,0,0,.28);
+  --radius:18px;
+  --radius-sm:12px;
+}
+*{box-sizing:border-box}
+html{background:var(--bg);scroll-behavior:smooth}
+body{
+  margin:0;
+  min-height:100vh;
+  font-family:Tahoma,"Segoe UI",system-ui,-apple-system,sans-serif;
+  background:
+    radial-gradient(circle at 88% 2%,rgba(214,180,111,.13),transparent 26%),
+    radial-gradient(circle at 12% 92%,rgba(91,140,255,.07),transparent 28%),
+    linear-gradient(180deg,#080b12 0%,#06080d 100%);
+  color:var(--text);
+  letter-spacing:-.01em;
+}
+button,input,select{font:inherit}
+button{user-select:none}
+a{color:inherit}
+.hidden{display:none!important}
+.muted{color:var(--muted)}
+.ok{color:var(--success)}
+.danger{color:#ffd2d5!important;border-color:rgba(239,123,131,.32)!important}
+.small{width:auto!important;display:inline-flex!important;align-items:center;justify-content:center;gap:7px}
+code{
+  direction:ltr;
+  unicode-bidi:plaintext;
+  color:#f4d99d;
+  background:rgba(214,180,111,.08);
+  border:1px solid rgba(214,180,111,.14);
+  padding:4px 7px;
+  border-radius:8px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.88em;
+}
+h1,h2,h3{margin:0;color:var(--text);font-weight:700}
+h1{font-size:28px;letter-spacing:-.04em}
+h2{font-size:18px}
+p{line-height:1.9}
+
+/* Login */
+#login{
+  width:min(960px,calc(100% - 36px));
+  min-height:560px;
+  margin:7vh auto;
+  display:grid;
+  grid-template-columns:minmax(0,1.02fr) minmax(320px,.98fr);
+  padding:0;
+  overflow:hidden;
+  border-radius:28px;
+  border:1px solid rgba(214,180,111,.18);
+  background:rgba(14,18,27,.94);
+  box-shadow:var(--shadow);
+  position:relative;
+}
+#login:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(135deg,rgba(255,255,255,.018),transparent 38%,rgba(214,180,111,.025));
+}
+.login-visual{
+  padding:54px 48px;
+  background:
+    linear-gradient(145deg,rgba(214,180,111,.12),rgba(214,180,111,.015) 48%),
+    linear-gradient(180deg,#151922,#0e121a);
+  border-left:1px solid rgba(214,180,111,.15);
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  min-height:560px;
+}
+.login-form{padding:54px 48px;display:flex;flex-direction:column;justify-content:center}
+.login-eyebrow,.section-eyebrow{
+  color:var(--gold);
+  font-size:11px;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+  font-weight:700;
+}
+.brand-lockup{display:flex;align-items:center;gap:14px}
+.brand-mark{
+  width:50px;height:50px;border-radius:15px;
+  display:grid;place-items:center;
+  background:linear-gradient(145deg,#f1d494,#9b793d);
+  color:#11151d;font-weight:900;font-size:18px;
+  box-shadow:0 12px 30px rgba(214,180,111,.2);
+  border:1px solid rgba(255,255,255,.26);
+}
+.brand-title{font-weight:800;font-size:19px;letter-spacing:.02em}
+.brand-sub{color:var(--muted);font-size:12px;margin-top:3px}
+.lux-line{height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent);margin:28px 0}
+.login-visual h2{font-size:34px;line-height:1.55;max-width:440px;letter-spacing:-.04em}
+.login-visual p{color:var(--text-soft);max-width:470px;font-size:14px}
+.security-note{
+  display:flex;gap:12px;align-items:flex-start;
+  padding:14px 15px;border-radius:14px;
+  border:1px solid rgba(214,180,111,.13);
+  background:rgba(5,7,11,.28);
+  color:var(--muted);font-size:12px;line-height:1.8;
+}
+.security-dot{width:8px;height:8px;border-radius:50%;background:var(--success);margin-top:6px;box-shadow:0 0 0 5px rgba(93,198,154,.08)}
+.login-form h1{font-size:31px;margin-top:10px}
+.login-form .lead{color:var(--muted);font-size:13px;margin:10px 0 26px}
+.field-group{display:grid;gap:13px}
+.field{display:grid;gap:7px}
+.field label{font-size:12px;color:var(--text-soft);font-weight:700}
+.divider{display:flex;align-items:center;gap:12px;color:#697180;font-size:11px;margin:18px 0}
+.divider:before,.divider:after{content:"";height:1px;flex:1;background:var(--line-soft)}
+#loginError{margin-top:12px;color:var(--danger);font-size:12px;min-height:18px}
+
+/* App shell */
+.shell{
+  display:grid;
+  grid-template-columns:278px minmax(0,1fr);
+  min-height:100vh;
+}
+.side{
+  position:sticky;
+  top:0;
+  height:100vh;
+  padding:24px 18px 18px;
+  border-left:1px solid rgba(214,180,111,.11);
+  background:
+    linear-gradient(180deg,rgba(16,20,29,.98),rgba(9,12,18,.99)),
+    radial-gradient(circle at top right,rgba(214,180,111,.08),transparent 32%);
+  box-shadow:12px 0 50px rgba(0,0,0,.22);
+  z-index:20;
+  overflow:auto;
+}
+.side-head{padding:2px 8px 20px;border-bottom:1px solid var(--line-soft);margin-bottom:14px}
+.side-meta{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+.role-badge{
+  padding:5px 9px;border-radius:999px;
+  color:var(--gold-strong);
+  background:rgba(214,180,111,.08);
+  border:1px solid rgba(214,180,111,.16);
+  font-size:10px;font-weight:700;letter-spacing:.08em;
+}
+.env-dot{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px}
+.env-dot:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 4px rgba(93,198,154,.08)}
+.nav{display:grid;gap:4px}
+.nav-label{
+  color:#616a79;font-size:10px;font-weight:800;letter-spacing:.15em;
+  padding:13px 11px 7px;text-transform:uppercase;
+}
+.nav button{
+  width:100%;
+  min-height:43px;
+  margin:0;
+  padding:10px 12px;
+  border:1px solid transparent;
+  border-radius:11px;
+  background:transparent;
+  color:#aeb6c3;
+  cursor:pointer;
+  text-align:right;
+  transition:.18s ease;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  position:relative;
+}
+.nav button:hover{
+  background:rgba(255,255,255,.028);
+  color:var(--text);
+  border-color:rgba(255,255,255,.04);
+  transform:translateX(-1px);
+}
+.nav button.active{
+  color:var(--gold-strong);
+  background:linear-gradient(90deg,rgba(214,180,111,.13),rgba(214,180,111,.045));
+  border-color:rgba(214,180,111,.14);
+}
+.nav button.active:after{
+  content:"";
+  position:absolute;
+  right:-19px;
+  width:3px;height:22px;border-radius:99px;
+  background:linear-gradient(180deg,var(--gold-strong),var(--gold-dim));
+  box-shadow:0 0 14px rgba(214,180,111,.38);
+}
+.nav-icon{
+  width:26px;height:26px;display:grid;place-items:center;flex:0 0 auto;
+  border-radius:8px;background:rgba(255,255,255,.035);
+  color:#8993a4;font-size:13px;
+}
+.nav button.active .nav-icon{background:rgba(214,180,111,.12);color:var(--gold-strong)}
+.side-footer{margin-top:18px;padding-top:14px;border-top:1px solid var(--line-soft)}
+
+main{min-width:0;padding:0 30px 34px}
+header{
+  position:sticky;top:0;z-index:15;
+  height:78px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 4px;
+  background:linear-gradient(180deg,rgba(7,9,15,.96),rgba(7,9,15,.82));
+  backdrop-filter:blur(18px);
+  border-bottom:1px solid rgba(255,255,255,.035);
+}
+.header-title-wrap{display:flex;align-items:center;gap:12px}
+.header-kicker{font-size:10px;letter-spacing:.15em;color:var(--gold);font-weight:800}
+#pageTitle{font-size:19px;font-weight:800;margin-top:2px}
+.header-actions{display:flex;align-items:center;gap:10px}
+.status-pill{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 11px;border-radius:999px;
+  border:1px solid var(--line);
+  background:rgba(16,20,29,.7);
+  color:var(--muted);font-size:11px;
+}
+.status-pill:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--success)}
+#view{padding-top:28px;animation:fadeIn .22s ease}
+@keyframes fadeIn{from{opacity:.3;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* Content */
+.page-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.card{
+  background:
+    linear-gradient(180deg,rgba(20,25,36,.92),rgba(14,18,27,.94));
+  border:1px solid rgba(255,255,255,.055);
+  border-radius:var(--radius);
+  padding:18px;
+  box-shadow:var(--shadow-soft);
+  position:relative;
+  overflow:hidden;
+}
+.card:after{
+  content:"";
+  position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(140deg,rgba(255,255,255,.025),transparent 35%);
+}
+.grid .card{
+  min-height:128px;
+  display:flex;flex-direction:column;justify-content:space-between;
+  border-color:rgba(214,180,111,.08);
+}
+.grid .card:before{
+  content:"";position:absolute;left:0;top:0;width:58px;height:2px;
+  background:linear-gradient(90deg,var(--gold),transparent);
+}
+.metric{font-size:27px;font-weight:800;color:var(--text);margin-top:16px;letter-spacing:-.035em}
+.toolbar{
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  margin:14px 0 0;
+}
+input,select{
+  min-height:42px;
+  background:#0b0f16;
+  color:var(--text);
+  border:1px solid #252c39;
+  border-radius:10px;
+  padding:9px 11px;
+  outline:none;
+  transition:.18s ease;
+}
+input::placeholder{color:#555f6f}
+input:focus,select:focus{
+  border-color:rgba(214,180,111,.62);
+  box-shadow:0 0 0 3px rgba(214,180,111,.08);
+  background:#0d1119;
+}
+input[type="checkbox"]{min-height:auto;accent-color:var(--gold);transform:translateY(1px)}
+label{color:var(--text-soft);font-size:12px}
+.btn{
+  min-height:40px;
+  width:100%;
+  margin:5px 0;
+  padding:9px 13px;
+  border:1px solid rgba(214,180,111,.22);
+  border-radius:10px;
+  background:linear-gradient(180deg,rgba(214,180,111,.13),rgba(214,180,111,.07));
+  color:var(--gold-strong);
+  cursor:pointer;
+  text-align:center;
+  font-weight:700;
+  font-size:12px;
+  transition:.17s ease;
+}
+.btn:hover{
+  transform:translateY(-1px);
+  border-color:rgba(214,180,111,.42);
+  background:linear-gradient(180deg,rgba(214,180,111,.2),rgba(214,180,111,.1));
+  box-shadow:0 8px 22px rgba(0,0,0,.18);
+}
+.btn.danger,.nav .danger{
+  color:#f6a9af!important;
+  background:rgba(239,123,131,.055);
+  border-color:rgba(239,123,131,.15)!important;
+}
+.btn.danger:hover,.nav .danger:hover{background:rgba(239,123,131,.1)!important}
+.table-wrap{
+  width:100%;
+  overflow:auto;
+  border-radius:var(--radius);
+  border:1px solid rgba(255,255,255,.055);
+  background:#0e121a;
+  box-shadow:var(--shadow-soft);
+}
+table{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}
+th,td{
+  padding:13px 15px;
+  text-align:right;
+  white-space:nowrap;
+  border-bottom:1px solid #1b2230;
+  font-size:12px;
+}
+th{
+  color:#7f8999;
+  background:#111722;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+}
+tbody tr{transition:.15s ease}
+tbody tr:hover{background:rgba(214,180,111,.025)}
+tbody tr:last-child td{border-bottom:0}
+td{color:#d7dde7}
+.empty-state{
+  border:1px dashed #2a3140;
+  background:rgba(16,20,29,.55);
+  border-radius:var(--radius);
+  padding:34px;text-align:center;color:var(--muted);
+}
+
+/* Scrollbars */
+*{scrollbar-width:thin;scrollbar-color:#343c4c #0a0d13}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:#0a0d13}
+::-webkit-scrollbar-thumb{background:#343c4c;border-radius:20px}
+
+/* Responsive */
+@media(max-width:1180px){
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .shell{grid-template-columns:244px minmax(0,1fr)}
+}
+@media(max-width:860px){
+  #login{grid-template-columns:1fr;margin:24px auto}
+  .login-visual{display:none}
+  .login-form{padding:36px 28px}
+  .shell{grid-template-columns:1fr}
+  .side{position:relative;height:auto;border-left:0;border-bottom:1px solid rgba(214,180,111,.11);padding:14px}
+  .side-head{padding-bottom:12px}
+  .nav{display:flex;overflow:auto;gap:6px;padding-bottom:4px}
+  .nav-label,.side-footer{display:none}
+  .nav button{min-width:max-content;width:auto;padding:8px 11px}
+  .nav button.active:after{display:none}
+  main{padding:0 16px 28px}
+  header{height:64px}
+}
+@media(max-width:560px){
+  .grid{grid-template-columns:1fr}
+  .login-form{padding:30px 22px}
+  .login-form h1{font-size:26px}
+  header{align-items:center}
+  .header-kicker{display:none}
+  #pageTitle{font-size:16px}
+  .status-pill{padding:7px 9px}
+}
 </style>
 </head>
 <body>
-<section id="login" class="card">
-<h1>ورود مدیریت</h1>
-<p class="muted">برای مدیران از نام کاربری و رمز عبور استفاده کنید. Owner می‌تواند با کلید مدیریت وارد شود.</p>
-<div class="toolbar">
-<input id="username" autocomplete="username" placeholder="نام کاربری" style="flex:1">
-<input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور" style="flex:1">
-</div>
-<div class="muted" style="margin:8px 0">یا</div>
-<input id="ownerKey" type="password" autocomplete="off" placeholder="ADMIN_PANEL_API_KEY (Owner)" style="width:100%">
-<button class="btn" onclick="login()">ورود</button>
-<div id="loginError" style="color:var(--danger)"></div>
+<section id="login">
+  <div class="login-visual">
+    <div>
+      <div class="brand-lockup">
+        <div class="brand-mark">PP</div>
+        <div>
+          <div class="brand-title">PANELPRIMEPASAR</div>
+          <div class="brand-sub">Executive Control Center</div>
+        </div>
+      </div>
+      <div class="lux-line"></div>
+      <div class="login-eyebrow">Premium Administration</div>
+      <h2>کنترل حرفه‌ای فروش، پرداخت و زیرساخت از یک مرکز فرماندهی.</h2>
+      <p>داشبورد مدیریتی رسمی برای مدیریت مشتریان، سفارش‌ها، درگاه‌ها، سرویس‌ها و زیرساخت PasarGuard.</p>
+    </div>
+    <div class="security-note">
+      <span class="security-dot"></span>
+      <div>ورود امن با نشست امضاشده و سطح دسترسی مبتنی بر نقش. اطلاعات حساس در رابط مدیریت نمایش داده نمی‌شوند.</div>
+    </div>
+  </div>
+  <div class="login-form">
+    <div class="section-eyebrow">Secure Access</div>
+    <h1>ورود به پنل مدیریت</h1>
+    <p class="lead">برای ورود از حساب مدیریتی خود استفاده کنید.</p>
+    <div class="field-group">
+      <div class="field">
+        <label for="username">نام کاربری</label>
+        <input id="username" autocomplete="username" placeholder="نام کاربری مدیریت">
+      </div>
+      <div class="field">
+        <label for="password">رمز عبور</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور">
+      </div>
+    </div>
+    <button class="btn" onclick="login()" style="margin-top:16px">ورود امن</button>
+    <div class="divider">ورود اضطراری Owner</div>
+    <div class="field">
+      <label for="ownerKey">کلید مدیریت</label>
+      <input id="ownerKey" type="password" autocomplete="off" placeholder="ADMIN_PANEL_API_KEY">
+    </div>
+    <div id="loginError"></div>
+  </div>
 </section>
+
 <section id="app" class="hidden">
-<div class="shell">
-<aside class="side">
-<h2>PANELPRIMEPASAR</h2>
-<div class="nav">
-<button data-perm="view_dashboard" onclick="show('dashboard')">📊 داشبورد</button>
-<button data-perm="view_users" onclick="show('customers')">👥 مشتریان</button>
-<button data-perm="manage_plans" onclick="show('plans')">📦 پلن‌ها</button>
-<button data-perm="manage_discounts" onclick="show('discounts')">🎟 تخفیف‌ها</button>
-<button data-perm="view_orders" onclick="show('orders')">🧾 سفارش‌ها</button>
-<button data-perm="view_payments" onclick="show('payments')">💳 پرداخت‌ها</button>
-<button data-perm="manage_payment_methods" onclick="show('paymentMethods')">🏦 روش‌های پرداخت</button>
-<button data-perm="manage_pasarguard" onclick="show('pasarguardInstances')">🛰 پاسارگاردها</button>
-<button data-perm="view_orders" onclick="show('subscriptions')">🔄 سرویس‌ها</button>
-<button data-perm="manage_support" onclick="show('support')">🎧 پشتیبانی</button>
-<button data-perm="manage_admins" onclick="show('staff')">👮 مدیران</button>
-<button data-perm="view_audit_logs" onclick="show('audit')">📜 لاگ‌ها</button>
-<button class="danger" onclick="logout()">خروج</button>
-</div>
-</aside>
-<main>
-<header><span id="status" class="muted">آماده</span></header>
-<div id="view"></div>
-</main>
-</div>
+  <div class="shell">
+    <aside class="side">
+      <div class="side-head">
+        <div class="brand-lockup">
+          <div class="brand-mark">PP</div>
+          <div>
+            <div class="brand-title">PANELPRIMEPASAR</div>
+            <div class="brand-sub">Executive Admin</div>
+          </div>
+        </div>
+        <div class="side-meta">
+          <span id="roleBadge" class="role-badge">ADMIN</span>
+          <span class="env-dot">Production</span>
+        </div>
+      </div>
+
+      <div class="nav">
+        <div class="nav-label">Overview</div>
+        <button data-view="dashboard" data-perm="view_dashboard" onclick="show('dashboard')"><span class="nav-icon">◆</span>داشبورد</button>
+
+        <div class="nav-label">Commerce</div>
+        <button data-view="customers" data-perm="view_users" onclick="show('customers')"><span class="nav-icon">◉</span>مشتریان</button>
+        <button data-view="plans" data-perm="manage_plans" onclick="show('plans')"><span class="nav-icon">▦</span>پلن‌ها</button>
+        <button data-view="discounts" data-perm="manage_discounts" onclick="show('discounts')"><span class="nav-icon">◇</span>تخفیف‌ها</button>
+        <button data-view="orders" data-perm="view_orders" onclick="show('orders')"><span class="nav-icon">▤</span>سفارش‌ها</button>
+        <button data-view="payments" data-perm="view_payments" onclick="show('payments')"><span class="nav-icon">◈</span>پرداخت‌ها</button>
+        <button data-view="paymentMethods" data-perm="manage_payment_methods" onclick="show('paymentMethods')"><span class="nav-icon">⌁</span>روش‌های پرداخت</button>
+
+        <div class="nav-label">Infrastructure</div>
+        <button data-view="pasarguardInstances" data-perm="manage_pasarguard" onclick="show('pasarguardInstances')"><span class="nav-icon">⬡</span>پاسارگاردها</button>
+        <button data-view="subscriptions" data-perm="view_orders" onclick="show('subscriptions')"><span class="nav-icon">↻</span>سرویس‌ها</button>
+
+        <div class="nav-label">Operations</div>
+        <button data-view="support" data-perm="manage_support" onclick="show('support')"><span class="nav-icon">◎</span>پشتیبانی</button>
+        <button data-view="staff" data-perm="manage_admins" onclick="show('staff')"><span class="nav-icon">♙</span>مدیران</button>
+        <button data-view="audit" data-perm="view_audit_logs" onclick="show('audit')"><span class="nav-icon">≡</span>لاگ‌ها</button>
+      </div>
+
+      <div class="side-footer">
+        <button class="danger" onclick="logout()"><span class="nav-icon">↪</span>خروج امن</button>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div class="header-title-wrap">
+          <div>
+            <div class="header-kicker">PANELPRIMEPASAR / CONTROL CENTER</div>
+            <div id="pageTitle">داشبورد</div>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="status-pill"><span id="status">آماده</span></div>
+        </div>
+      </header>
+      <div id="view"></div>
+    </main>
+  </div>
 </section>
 <script>
 const $=s=>document.querySelector(s);
@@ -75,6 +510,8 @@ function can(permission){return permissions().includes(permission)}
 function applyPermissions(){
   const allowed=new Set(permissions());
   document.querySelectorAll('[data-perm]').forEach(el=>el.classList.toggle('hidden',!allowed.has(el.dataset.perm)));
+  const role=sessionStorage.getItem('adminRole')||'admin';
+  const badge=$('#roleBadge');if(badge)badge.textContent=role.toUpperCase();
 }
 async function api(path,opts={}){
   const headers={...(opts.headers||{})};
@@ -107,19 +544,30 @@ async function login(){
 }
 function logout(){sessionStorage.clear();location.reload()}
 function table(rows,cols){
-  if(!rows.length)return '<p class="muted">داده‌ای وجود ندارد.</p>';
+  if(!rows.length)return '<div class="empty-state">داده‌ای برای نمایش وجود ندارد.</div>';
   return '<div class="table-wrap"><table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+
   rows.map(r=>'<tr>'+cols.map(c=>'<td>'+c[1](r)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'
 }
+const viewTitles={
+ dashboard:'داشبورد مدیریتی',customers:'مدیریت مشتریان',plans:'پلن‌های فروش',discounts:'کدهای تخفیف',
+ orders:'سفارش‌ها',payments:'تراکنش‌ها و پرداخت‌ها',paymentMethods:'روش‌های پرداخت',
+ pasarguardInstances:'زیرساخت PasarGuard',subscriptions:'سرویس‌ها',support:'پشتیبانی',
+ staff:'مدیران و دسترسی‌ها',audit:'گزارش فعالیت‌ها'
+};
+function activateNav(name){
+  document.querySelectorAll('.nav button[data-view]').forEach(btn=>btn.classList.toggle('active',btn.dataset.view===name));
+  const title=$('#pageTitle');if(title)title.textContent=viewTitles[name]||'مدیریت';
+}
 async function show(name){
+  activateNav(name);
   $('#status').textContent='در حال بارگذاری...';
-  try{await views[name]();$('#status').textContent='به‌روز'}catch(e){$('#view').innerHTML='<div class="card" style="color:var(--danger)">'+esc(e.message)+'</div>';$('#status').textContent='خطا'}
+  try{await views[name]();$('#status').textContent='به‌روز و همگام'}catch(e){$('#view').innerHTML='<div class="card" style="color:var(--danger)">'+esc(e.message)+'</div>';$('#status').textContent='خطا در دریافت اطلاعات'}
 }
 const views={
  dashboard:async()=>{
   const d=await api('/admin/dashboard');
   const items=[['کاربران',d.customers],['سرویس فعال',d.active_services],['سفارش در جریان',d.pending_orders],['پرداخت موفق',d.verified_payments],['درآمد تاییدشده',Number(d.verified_revenue).toLocaleString()+' IRT'],['تیکت باز',d.open_tickets],['اکانت پاسارگارد',d.pasarguard_accounts],['پلن‌ها',d.plans]];
-  $('#view').innerHTML='<h1>داشبورد</h1><div class="grid">'+items.map(x=>'<div class="card"><div class="muted">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>').join('')+'</div>'
+  $('#view').innerHTML='<div class="page-head"><div><div class="section-eyebrow">Executive Overview</div><h1>داشبورد مدیریتی</h1></div></div><div class="grid">'+items.map(x=>'<div class="card"><div class="muted">'+esc(x[0])+'</div><div class="metric">'+esc(x[1])+'</div></div>').join('')+'</div>'
  },
  customers:async()=>{
   const rows=await api('/admin/customers?limit=100');
