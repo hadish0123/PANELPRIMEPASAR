@@ -18,7 +18,7 @@ from panelprimepasar.keyboards.customer import (
     plan_actions_keyboard,
     plans_keyboard,
 )
-from panelprimepasar.models import Customer, Order, OrderStatus
+from panelprimepasar.models import Customer, Order, OrderStatus, PaymentMethodKind
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
@@ -28,7 +28,10 @@ from panelprimepasar.services.orders import (
     list_customer_orders,
     upsert_customer,
 )
-from panelprimepasar.services.payment_methods import list_enabled_payment_methods
+from panelprimepasar.services.payment_methods import (
+    get_payment_method_by_slug,
+    list_enabled_payment_methods,
+)
 from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
@@ -244,6 +247,63 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
     )
 
 
+@router.callback_query(F.data.startswith("rm:"))
+async def manual_card_receipt_start(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    raw = callback.data or ""
+    parts = raw.removeprefix("rm:").split(":", maxsplit=1)
+    if len(parts) != 2:
+        await callback.answer("اطلاعات پرداخت معتبر نیست.", show_alert=True)
+        return
+
+    slug, order_hex = parts
+    try:
+        order_id = UUID(hex=order_hex)
+    except ValueError:
+        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        return
+
+    order_customer = await _customer_order(
+        session,
+        telegram_user_id=callback.from_user.id,
+        order_id=order_id,
+    )
+    if order_customer is None:
+        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        return
+    _, order = order_customer
+    if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
+        await callback.answer(
+            f"وضعیت سفارش: {order_status_label(order.status)}",
+            show_alert=True,
+        )
+        return
+
+    method = await get_payment_method_by_slug(
+        session,
+        slug=slug,
+        enabled_only=True,
+    )
+    if method is None or method.kind != PaymentMethodKind.MANUAL_CARD.value:
+        await callback.answer("روش کارت‌به‌کارت فعال نیست.", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(
+        order_id=str(order.id),
+        payment_method_id=str(method.id),
+    )
+    await state.set_state(ReceiptForm.waiting_receipt)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            f"رسید پرداخت «{escape(method.display_name)}» را ارسال کنید."
+        )
+
+
 @router.callback_query(F.data.startswith("receipt:"))
 async def receipt_start(
     callback: CallbackQuery,
@@ -298,6 +358,12 @@ async def receipt_received(
     data = await state.get_data()
     try:
         order_id = UUID(str(data["order_id"]))
+        payment_method_raw = data.get("payment_method_id")
+        payment_method_id = (
+            UUID(str(payment_method_raw))
+            if payment_method_raw is not None
+            else None
+        )
     except (KeyError, ValueError):
         await state.clear()
         await message.answer("اطلاعات سفارش معتبر نیست؛ دوباره از سفارش وارد ارسال رسید شوید.")
@@ -337,6 +403,7 @@ async def receipt_received(
             order_id=order.id,
             provider="manual",
             raw_reference=f"telegram:{receipt_kind}:{file_id}",
+            payment_method_id=payment_method_id,
         )
     except PaymentStateError as exc:
         await session.rollback()
@@ -355,6 +422,11 @@ async def receipt_received(
         metadata={
             "payment_id": str(payment.id),
             "receipt_kind": receipt_kind,
+            "payment_method_id": (
+                str(payment_method_id)
+                if payment_method_id is not None
+                else None
+            ),
         },
     )
     await session.commit()
