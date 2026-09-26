@@ -1,4 +1,6 @@
 import secrets
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -23,11 +25,28 @@ from panelprimepasar.models import (
     Subscription,
     SupportTicket,
 )
+from panelprimepasar.security import (
+    ROLE_PERMISSIONS,
+    AdminRole,
+    Permission,
+    WebAdminSecurityError,
+    create_session_token,
+    has_permission,
+    verify_session_token,
+)
+from panelprimepasar.services.admins import (
+    AdminAccessError,
+    authenticate_web_staff,
+    set_web_staff_password,
+    upsert_web_staff_admin,
+)
+from panelprimepasar.services.audit import record_audit_event
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 AdminKeyHeader = Annotated[str | None, Header(alias="X-Admin-Key")]
+AdminAuthorizationHeader = Annotated[str | None, Header(alias="Authorization")]
 SearchQuery = Annotated[str | None, Query(max_length=128)]
 OffsetQuery = Annotated[int, Query(ge=0)]
 LimitQuery = Annotated[int, Query(ge=1, le=100)]
@@ -64,6 +83,118 @@ class StaffStatusRequest(BaseModel):
     active: bool
 
 
+class AdminLoginRequest(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=64)
+    password: str | None = Field(default=None, min_length=1, max_length=512)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class StaffCreateRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=12, max_length=512)
+    role: AdminRole
+    telegram_user_id: int | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+
+class StaffPasswordRequest(BaseModel):
+    password: str = Field(min_length=12, max_length=512)
+
+
+@dataclass(frozen=True, slots=True)
+class WebAdminPrincipal:
+    role: AdminRole
+    staff_id: UUID | None
+    username: str
+
+
+def _session_secret() -> str:
+    settings = get_settings()
+    configured = settings.admin_panel_session_secret or settings.admin_panel_api_key
+    if configured is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Admin panel session secret is not configured",
+        )
+    return configured.get_secret_value()
+
+
+def _owner_key_valid(api_key: str | None) -> bool:
+    configured = get_settings().admin_panel_api_key
+    return (
+        configured is not None
+        and api_key is not None
+        and secrets.compare_digest(api_key, configured.get_secret_value())
+    )
+
+
+async def _authenticate_web_admin(
+    session: AsyncSession,
+    *,
+    api_key: str | None,
+    authorization: str | None,
+) -> WebAdminPrincipal:
+    if _owner_key_valid(api_key):
+        return WebAdminPrincipal(
+            role=AdminRole.OWNER,
+            staff_id=None,
+            username="owner",
+        )
+
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+
+    scheme, separator, token = authorization.partition(" ")
+    if not separator or scheme.casefold() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+
+    try:
+        claims = verify_session_token(token, secret=_session_secret())
+    except WebAdminSecurityError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if claims.staff_id is None:
+        if claims.role != AdminRole.OWNER:
+            raise HTTPException(status_code=401, detail="Invalid admin session")
+        return WebAdminPrincipal(
+            role=AdminRole.OWNER,
+            staff_id=None,
+            username="owner",
+        )
+
+    staff = await session.get(StaffAdmin, claims.staff_id)
+    if staff is None or not staff.is_active or staff.login_username is None:
+        raise HTTPException(status_code=401, detail="Admin account is inactive")
+
+    try:
+        current_role = AdminRole(staff.role)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Admin role is invalid") from exc
+
+    return WebAdminPrincipal(
+        role=current_role,
+        staff_id=staff.id,
+        username=staff.login_username,
+    )
+
+
+async def _require_web_permission(
+    session: AsyncSession,
+    *,
+    api_key: str | None,
+    authorization: str | None,
+    permission: Permission,
+) -> WebAdminPrincipal:
+    principal = await _authenticate_web_admin(
+        session,
+        api_key=api_key,
+        authorization=authorization,
+    )
+    if not has_permission(principal.role, permission):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return principal
+
+
 def _check_admin_key(api_key: str | None) -> None:
     settings = get_settings()
     configured = settings.admin_panel_api_key
@@ -77,12 +208,100 @@ def _check_admin_key(api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
 
 
+@router.post("/auth/login")
+async def admin_login(
+    payload: AdminLoginRequest,
+    session: SessionDep,
+) -> dict[str, object]:
+    settings = get_settings()
+    role: AdminRole
+    staff_id: UUID | None
+    username: str
+
+    if payload.api_key is not None and _owner_key_valid(payload.api_key):
+        role = AdminRole.OWNER
+        staff_id = None
+        username = "owner"
+    elif payload.username is not None and payload.password is not None:
+        staff = await authenticate_web_staff(
+            session,
+            username=payload.username,
+            password=payload.password,
+        )
+        if staff is None or staff.login_username is None:
+            raise HTTPException(status_code=401, detail="Invalid admin credentials")
+        try:
+            role = AdminRole(staff.role)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="Admin role is invalid") from exc
+        staff.last_login_at = datetime.now(UTC)
+        staff_id = staff.id
+        username = staff.login_username
+    else:
+        raise HTTPException(status_code=401, detail="Invalid admin credentials")
+
+    token = create_session_token(
+        role=role,
+        staff_id=staff_id,
+        secret=_session_secret(),
+        ttl_seconds=settings.admin_panel_session_ttl_seconds,
+    )
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(staff_id) if staff_id is not None else "owner",
+        action="admin.web_login",
+        entity_type="staff_admin",
+        entity_id=str(staff_id) if staff_id is not None else None,
+        metadata={"role": role.value, "username": username},
+    )
+    await session.commit()
+    return {
+        "token": token,
+        "token_type": "bearer",
+        "expires_in": settings.admin_panel_session_ttl_seconds,
+        "role": role.value,
+        "username": username,
+        "permissions": sorted(
+            permission.value for permission in ROLE_PERMISSIONS[role]
+        ),
+    }
+
+
+@router.get("/auth/me")
+async def admin_me(
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_DASHBOARD,
+    )
+    return {
+        "role": principal.role.value,
+        "username": principal.username,
+        "staff_id": str(principal.staff_id) if principal.staff_id is not None else None,
+        "permissions": sorted(
+            permission.value for permission in ROLE_PERMISSIONS[principal.role]
+        ),
+    }
+
+
 @router.get("/dashboard")
 async def dashboard(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, int | str]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_DASHBOARD,
+    )
 
     customers_count = int(await session.scalar(select(func.count(Customer.id))) or 0)
     plans_count = int(await session.scalar(select(func.count(Plan.id))) or 0)
@@ -156,12 +375,18 @@ async def dashboard(
 async def customers(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     search: SearchQuery = None,
     blocked: bool | None = None,
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_USERS,
+    )
     query = select(Customer)
 
     if blocked is not None:
@@ -217,8 +442,14 @@ async def set_customer_blocked(
     payload: CustomerBlockRequest,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_USERS,
+    )
     customer = await session.get(Customer, customer_id)
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -235,8 +466,14 @@ async def set_customer_blocked(
 async def plans(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PLANS,
+    )
     rows = (
         await session.scalars(
             select(Plan).order_by(
@@ -266,8 +503,14 @@ async def create_plan(
     payload: PlanCreateRequest,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PLANS,
+    )
     normalized_name = payload.name.strip()
     duplicate = await session.scalar(
         select(Plan).where(Plan.name == normalized_name)
@@ -295,8 +538,14 @@ async def update_plan(
     payload: PlanUpdateRequest,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PLANS,
+    )
     plan = await session.get(Plan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -339,8 +588,14 @@ async def archive_plan(
     plan_id: UUID,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PLANS,
+    )
     plan = await session.get(Plan, plan_id)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -354,12 +609,18 @@ async def archive_plan(
 async def orders(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     order_status: OrderStatusQuery = None,
     order_kind: OrderKindQuery = None,
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_ORDERS,
+    )
     query = select(Order)
 
     if order_status is not None:
@@ -401,12 +662,18 @@ async def orders(
 async def payments(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     payment_status: PaymentStatusQuery = None,
     provider: str | None = Query(default=None, max_length=32),
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_PAYMENTS,
+    )
     query = select(Payment)
     if payment_status is not None:
         query = query.where(Payment.status == payment_status)
@@ -442,12 +709,18 @@ async def payments(
 async def subscriptions(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     status: str | None = Query(default=None, max_length=32),
     customer_id: UUID | None = None,
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_ORDERS,
+    )
     query = select(Subscription)
     if status:
         query = query.where(Subscription.status == status)
@@ -483,11 +756,17 @@ async def subscriptions(
 async def pasar_guard_accounts(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     active: bool | None = None,
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PASARGUARD,
+    )
     query = select(PasarGuardAccount)
     if active is not None:
         query = query.where(PasarGuardAccount.is_active == active)
@@ -522,11 +801,17 @@ async def pasar_guard_accounts(
 async def support_tickets(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     status: str | None = Query(default=None, max_length=32),
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_SUPPORT,
+    )
     query = select(SupportTicket)
     if status:
         query = query.where(SupportTicket.status == status)
@@ -551,12 +836,101 @@ async def support_tickets(
     ]
 
 
+@router.post("/staff", status_code=201)
+async def create_staff(
+    payload: StaffCreateRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_ADMINS,
+    )
+    try:
+        staff_admin = await upsert_web_staff_admin(
+            session,
+            username=payload.username,
+            password=payload.password,
+            role=payload.role,
+            telegram_user_id=payload.telegram_user_id,
+            note=payload.note,
+        )
+    except (AdminAccessError, WebAdminSecurityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="staff.web_upserted",
+        entity_type="staff_admin",
+        entity_id=str(staff_admin.id),
+        metadata={
+            "username": staff_admin.login_username,
+            "role": staff_admin.role,
+            "telegram_user_id": staff_admin.telegram_user_id,
+        },
+    )
+    await session.commit()
+    return {
+        "id": str(staff_admin.id),
+        "username": staff_admin.login_username,
+        "telegram_user_id": staff_admin.telegram_user_id,
+        "role": staff_admin.role,
+        "active": staff_admin.is_active,
+    }
+
+
+@router.patch("/staff/{staff_id}/password")
+async def change_staff_password(
+    staff_id: UUID,
+    payload: StaffPasswordRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_ADMINS,
+    )
+    try:
+        staff_admin = await set_web_staff_password(
+            session,
+            staff_id=staff_id,
+            password=payload.password,
+        )
+    except (AdminAccessError, WebAdminSecurityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="staff.password_changed",
+        entity_type="staff_admin",
+        entity_id=str(staff_admin.id),
+    )
+    await session.commit()
+    return {"id": str(staff_admin.id), "password_changed": True}
+
+
 @router.get("/staff")
 async def staff(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_ADMINS,
+    )
     rows = (
         await session.scalars(
             select(StaffAdmin).order_by(
@@ -588,8 +962,14 @@ async def set_staff_status(
     payload: StaffStatusRequest,
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
 ) -> dict[str, object]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_ADMINS,
+    )
     staff_admin = await session.get(StaffAdmin, staff_id)
     if staff_admin is None:
         raise HTTPException(status_code=404, detail="Staff admin not found")
@@ -603,11 +983,17 @@ async def set_staff_status(
 async def audit_logs(
     session: SessionDep,
     x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
     action: str | None = Query(default=None, max_length=128),
     offset: OffsetQuery = 0,
     limit: LimitQuery = 100,
 ) -> list[dict[str, object]]:
-    _check_admin_key(x_admin_key)
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.VIEW_AUDIT_LOGS,
+    )
     query = select(AuditEvent)
     if action:
         query = query.where(AuditEvent.action == action)
