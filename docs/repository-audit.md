@@ -29,8 +29,9 @@ are outside this repository's scope.
 
 Python 3.13.15 installed locally. The 17 tests not requiring PostgreSQL pass.
 Ruff reports 10 findings and mypy one type error in the admin API.
-Database tests require an isolated PostgreSQL instance, which is being prepared;
-production data and production payment/provisioning credentials are not used.
+A GitHub Actions run on 2026-09-26 passed all 47 tests with real PostgreSQL and Redis,
+plus migrations and Docker build. Production data and live payment/provisioning
+credentials were not used. Browser checks are added as an additional CI gate.
 
 ## Implementation sequence
 
@@ -40,3 +41,12 @@ production data and production payment/provisioning credentials are not used.
 3. Add usable admin management flows with atomic audit records and an RTL UI.
 4. Test real PostgreSQL transactions, HTTP authorization and failure scenarios;
    document deployment and remaining product gaps explicitly.
+
+## Implemented changes
+
+Individual web admins and permission checks; transactional admin CRUD/actions;
+Persian RTL console; customer blocking at checkout; payment state/lock corrections;
+receipt preservation; safe password-only reissue; typed malformed-upstream errors;
+readiness and secure headers; non-root container and production Compose; detailed
+installation and backup guide. The unsupported product areas listed above remain
+tracked explicitly and are not presented as working features.

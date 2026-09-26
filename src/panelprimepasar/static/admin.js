@@ -35,7 +35,7 @@ function field(form,name,label,value="",type="text",options){const l=node("label
 function form(parent,submit){const f=node("form");f.onsubmit=async(e)=>{e.preventDefault();const b=f.querySelector('[type="submit"]');b.disabled=true;try{await submit(new FormData(f));}catch(err){notify(err.message,true);}finally{b.disabled=false;}};parent.append(f);return f;}
 function submitButton(f,label="ذخیره"){const b=node("button",label,"primary");b.type="submit";f.append(b);}
 function addFilter(name,placeholder,options){const el=node(options?"select":"input");el.setAttribute("aria-label",placeholder);if(options){el.append(new Option(placeholder,""));for(const [val,text] of Object.entries(options))el.append(new Option(text,val));}else{el.placeholder=placeholder;el.maxLength=128;}el.value=filters[name]||"";el.onchange=()=>{filters[name]=el.value;offset=0;load().catch(e=>notify(e.message,true));};$("#toolbar").append(el);}
-async function load(){if(busy)return;busy=true;$("#refresh").disabled=true;try{clearNotice();$("#page-title").textContent=sections[page][0];$("#toolbar").replaceChildren();$("#pagination").replaceChildren();$("#content").replaceChildren(node("p","در حال دریافت اطلاعات…","muted"));
+async function load(){if(busy)return;busy=true;$("#refresh").disabled=true;for(const b of $("#navigation").querySelectorAll("button"))b.disabled=true;try{clearNotice();$("#page-title").textContent=sections[page][0];$("#toolbar").replaceChildren();$("#pagination").replaceChildren();$("#content").replaceChildren(node("p","در حال دریافت اطلاعات…","muted"));
   if(page==="customers"){addFilter("search","جست‌وجوی نام یا شناسه تلگرام");addFilter("blocked","همه مشتریان",{false:"فعال",true:"مسدود"});}
   if(page==="orders")addFilter("status","همه وضعیت‌ها",Object.fromEntries(Object.entries(statuses).slice(0,7)));
   if(page==="payments")addFilter("status","همه پرداخت‌ها",{pending:"در انتظار",verified:"تأییدشده",failed:"ردشده",refunded:"برگشت‌خورده"});
@@ -43,12 +43,13 @@ async function load(){if(busy)return;busy=true;$("#refresh").disabled=true;try{c
   if(page==="plans")$("#toolbar").append(button("پلن جدید",()=>planForm(),"primary"));
   if(page==="admins")$("#toolbar").append(button("مدیر جدید",()=>adminForm(),"primary"));
   const query=new URLSearchParams({offset,limit:pageSize,...Object.fromEntries(Object.entries(filters).filter(([,v])=>v!==""))});
+  for(const el of $("#toolbar").querySelectorAll("button,input,select"))el.disabled=true;
   const data=await api(`/${page}?${query}`), count=total,content=$("#content");content.replaceChildren();
   renderers[page](content,data);
   if(["customers","plans","orders","payments","accounts","audit"].includes(page)){
     const prev=button("صفحه قبل",async()=>{offset=Math.max(0,offset-pageSize);await load();}),next=button("صفحه بعد",async()=>{offset+=pageSize;await load();});prev.disabled=offset===0;next.disabled=offset+pageSize>=count;$("#pagination").append(prev,node("span",`${offset+1} تا ${Math.min(offset+pageSize,count)} از ${count}`),next);
   }
-}finally{busy=false;$("#refresh").disabled=false;}}
+}finally{busy=false;$("#refresh").disabled=false;for(const el of document.querySelectorAll("#navigation button,#toolbar button,#toolbar input,#toolbar select"))el.disabled=false;}}
 async function changed(message="تغییر ثبت شد."){$("#dialog").close();await load();notify(message);}
 async function planForm(p={}){const c=modal(p.id?"ویرایش پلن":"پلن جدید"),f=form(c,async d=>{const body={name:d.get("name"),description:d.get("description"),quota_bytes:Number(d.get("quota_bytes")),price_amount:Number(d.get("price_amount")),currency:d.get("currency"),validity_days:d.get("validity_days")?Number(d.get("validity_days")):null,is_active:d.get("active")==="on",sort_order:Number(d.get("sort_order"))};await send(p.id?`/plans/${p.id}`:"/plans",p.id?"PUT":"POST",body);await changed();});
   field(f,"name","نام",p.name).required=true;field(f,"description","توضیحات",p.description,"textarea");field(f,"quota_bytes","حجم به بایت (هر GB برابر ۱٬۰۰۰٬۰۰۰٬۰۰۰ بایت)",p.quota_bytes,"number").required=true;field(f,"price_amount","قیمت",p.price_amount,"number").required=true;field(f,"currency","واحد پول",p.currency||"IRT","text",{IRT:"تومان",IRR:"ریال",USD:"USD",EUR:"EUR"});field(f,"validity_days","اعتبار به روز — خالی: نامحدود",p.validity_days,"number");field(f,"sort_order","ترتیب نمایش",p.sort_order||0,"number");field(f,"active","فعال",p.active??true,"checkbox");c.prepend(node("p","اعتبار زمانی فعلاً در سفارش ثبت می‌شود؛ قطع خودکار سرویس هنوز فعال نیست.","muted"));submitButton(f);}

@@ -67,5 +67,17 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
+      - name: Browser end-to-end
+        run: |
+          playwright install --with-deps chromium
+          python tests/browser/admin_flow.py
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-artifacts
+          path: browser-artifacts/
+          if-no-files-found: ignore
+
       - name: Docker build
         run: docker build -t panelprimepasar:test .
