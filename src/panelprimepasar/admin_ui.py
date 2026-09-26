@@ -1,6 +1,6 @@
 # ruff: noqa: E501
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
 
@@ -412,6 +412,7 @@ td{color:#394457}
 </style>
 </head>
 <body>
+<noscript><div style="margin:24px;padding:16px;border:1px solid #e0b8bb;border-radius:12px;background:#fff1f1;color:#9b3039;text-align:center">برای استفاده از پنل مدیریت، JavaScript مرورگر باید فعال باشد.</div></noscript>
 <section id="login">
   <div class="login-visual">
     <div>
@@ -516,7 +517,11 @@ td{color:#394457}
     </main>
   </div>
 </section>
-<script>
+<script src="/admin/ui.js" defer></script>
+</body>
+</html>"""
+
+_ADMIN_JS = r"""
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function token(){return sessionStorage.getItem('adminToken')||''}
@@ -772,9 +777,16 @@ if(loginForm){
   });
 }
 restoreSession()
-</script>
-</body>
-</html>"""
+"""
+
+
+
+@router.get("/ui.js", response_class=Response)
+async def admin_ui_javascript() -> Response:
+    response = Response(_ADMIN_JS, media_type="application/javascript")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @router.get("", response_class=RedirectResponse)
