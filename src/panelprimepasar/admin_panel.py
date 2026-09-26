@@ -105,12 +105,19 @@ async def customers(
                 .replace("%", "\\%")
                 .replace("_", "\\_")
             )
-            conditions = [
-                Customer.telegram_username.ilike(f"%{literal}%", escape="\\")
-            ]
+            username_condition = Customer.telegram_username.ilike(
+                f"%{literal}%",
+                escape="\\",
+            )
             if term.isdecimal() and len(term) <= 19:
-                conditions.append(Customer.telegram_user_id == int(term))
-            query = query.where(or_(*conditions))
+                query = query.where(
+                    or_(
+                        username_condition,
+                        Customer.telegram_user_id == int(term),
+                    )
+                )
+            else:
+                query = query.where(username_condition)
 
     rows = (
         await session.scalars(
