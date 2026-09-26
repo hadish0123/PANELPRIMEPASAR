@@ -16,8 +16,6 @@ from panelprimepasar.models import (
     Customer,
     Order,
     OrderKind,
-    PasarGuardAccount,
-    PasarGuardInstance,
     Payment,
     PaymentMethodConfig,
     PaymentStatus,
@@ -25,6 +23,7 @@ from panelprimepasar.models import (
 from panelprimepasar.payments.base import PaymentProviderError
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.payment_methods import (
     PaymentMethodStateError,
     verify_external_payment,
@@ -56,25 +55,6 @@ h1{{color:{accent}}}p{{line-height:1.9}}code{{direction:ltr;display:inline-block
 <p>می‌توانید این صفحه را ببندید و به ربات تلگرام برگردید.</p></div></body>
 </html>"""
     return HTMLResponse(body, status_code=200 if ok else 400)
-
-
-async def _panel_url(
-    session: AsyncSession,
-    *,
-    order_id: UUID,
-) -> str:
-    settings = get_settings()
-    account = await session.scalar(
-        select(PasarGuardAccount).where(PasarGuardAccount.order_id == order_id)
-    )
-    if account is not None and account.pasarguard_instance_id is not None:
-        instance = await session.get(
-            PasarGuardInstance,
-            account.pasarguard_instance_id,
-        )
-        if instance is not None:
-            return instance.base_url.rstrip("/")
-    return str(settings.pasarguard_base_url).rstrip("/")
 
 
 async def _telegram_bot(request: Request) -> Bot | None:
@@ -207,7 +187,11 @@ async def payment_callback(
     if bot is not None and outcome.success:
         try:
             if outcome.order_kind == OrderKind.NEW and outcome.credentials is not None:
-                panel_url = await _panel_url(session, order_id=order.id)
+                panel_url = await resolve_order_panel_url(
+                    session,
+                    settings=get_settings(),
+                    order_id=order.id,
+                )
                 await bot.send_message(
                     customer.telegram_user_id,
                     "<b>✅ پرداخت تایید شد و پنل نمایندگی آماده است.</b>\n\n"
