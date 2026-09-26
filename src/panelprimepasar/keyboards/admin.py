@@ -67,8 +67,16 @@ def admin_order_actions_keyboard(order: Order) -> InlineKeyboardMarkup:
 
     if order.status in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
         builder.button(
-            text="✅ تأیید دستی پرداخت و ساخت پنل",
+            text="✅ تأیید پرداخت و اجرای سفارش",
             callback_data=f"admin:approve:{order.id}",
+        )
+        builder.button(
+            text="❌ رد رسید پرداخت",
+            callback_data=f"admin:reject_payment:{order.id}",
+        )
+        builder.button(
+            text="🗑 لغو سفارش",
+            callback_data=f"admin:cancel_order:{order.id}",
         )
     elif order.status in {OrderStatus.PAID, OrderStatus.PROVISIONING, OrderStatus.FAILED}:
         builder.button(
