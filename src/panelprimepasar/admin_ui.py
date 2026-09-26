@@ -48,6 +48,7 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <button data-perm="view_dashboard" onclick="show('dashboard')">📊 داشبورد</button>
 <button data-perm="view_users" onclick="show('customers')">👥 مشتریان</button>
 <button data-perm="manage_plans" onclick="show('plans')">📦 پلن‌ها</button>
+<button data-perm="manage_discounts" onclick="show('discounts')">🎟 تخفیف‌ها</button>
 <button data-perm="view_orders" onclick="show('orders')">🧾 سفارش‌ها</button>
 <button data-perm="view_payments" onclick="show('payments')">💳 پرداخت‌ها</button>
 <button data-perm="view_orders" onclick="show('subscriptions')">🔄 سرویس‌ها</button>
@@ -126,6 +127,10 @@ const views={
   const rows=await api('/admin/plans');
   $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" placeholder="نام"><input id="pquota" type="number" placeholder="حجم بایت"><input id="pprice" type="number" placeholder="قیمت تومان"><input id="pdays" type="number" placeholder="روز"><button class="btn small" onclick="createPlan()">➕ ساخت</button></div></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['اعتبار',r=>esc(r.validity_days??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])
  },
+ discounts:async()=>{
+  const rows=await api('/admin/discounts');
+  $('#view').innerHTML='<h1>کدهای تخفیف</h1><div class="card"><div class="toolbar"><input id="dcode" placeholder="کد"><select id="dkind"><option value="percent">درصدی</option><option value="fixed">مبلغ ثابت</option></select><input id="dvalue" type="number" placeholder="مقدار"><input id="dmax" type="number" placeholder="حداکثر استفاده"><button class="btn small" onclick="createDiscount()">➕ ساخت</button></div></div>'+table(rows,[['کد',r=>'<code>'+esc(r.code)+'</code>'],['نوع',r=>esc(r.kind)],['مقدار',r=>r.kind==='percent'?esc(r.value_percent)+'%':Number(r.value_amount||0).toLocaleString()],['استفاده',r=>esc(r.used_count)+' / '+esc(r.max_uses??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button class="btn small" onclick="toggleDiscount(\''+r.id+'\','+(!r.active)+')">'+(r.active?'غیرفعال':'فعال')+'</button>']])
+ },
  orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>Number(r.quota_bytes).toLocaleString()]])},
  payments:async()=>{const rows=await api('/admin/payments?limit=100');$('#view').innerHTML='<h1>پرداخت‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['درگاه',r=>esc(r.provider)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>esc(r.status)],['تراکنش',r=>esc(r.transaction_id)]])},
  subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['انقضا',r=>esc(r.expires_at||'∞')],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
@@ -149,6 +154,13 @@ async function createPlan(){
  const body={name:$('#pname').value,quota_bytes:Number($('#pquota').value),price_amount:Number($('#pprice').value),currency:'IRT',validity_days:$('#pdays').value?Number($('#pdays').value):null};
  await api('/admin/plans',{method:'POST',body:JSON.stringify(body)});show('plans')
 }
+async function createDiscount(){
+ const kind=$('#dkind').value,value=Number($('#dvalue').value),maxRaw=$('#dmax').value;
+ const body={code:$('#dcode').value,kind,max_uses:maxRaw?Number(maxRaw):null};
+ if(kind==='percent')body.value_percent=value;else body.value_amount=value;
+ await api('/admin/discounts',{method:'POST',body:JSON.stringify(body)});show('discounts')
+}
+async function toggleDiscount(id,active){await api('/admin/discounts/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});show('discounts')}
 async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
 if(token()){api('/admin/auth/me').then(me=>{sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));$('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')}).catch(()=>sessionStorage.clear())}
 </script>
