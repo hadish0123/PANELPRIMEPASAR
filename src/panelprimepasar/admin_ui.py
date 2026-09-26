@@ -30,8 +30,13 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <body>
 <section id="login" class="card">
 <h1>ورود مدیریت</h1>
-<p class="muted">کلید مدیریت را وارد کنید. کلید فقط در Session مرورگر نگه‌داری می‌شود.</p>
-<input id="key" type="password" placeholder="ADMIN_PANEL_API_KEY" style="width:100%">
+<p class="muted">برای مدیران از نام کاربری و رمز عبور استفاده کنید. Owner می‌تواند با کلید مدیریت وارد شود.</p>
+<div class="toolbar">
+<input id="username" autocomplete="username" placeholder="نام کاربری" style="flex:1">
+<input id="password" type="password" autocomplete="current-password" placeholder="رمز عبور" style="flex:1">
+</div>
+<div class="muted" style="margin:8px 0">یا</div>
+<input id="ownerKey" type="password" autocomplete="off" placeholder="ADMIN_PANEL_API_KEY (Owner)" style="width:100%">
 <button class="btn" onclick="login()">ورود</button>
 <div id="loginError" style="color:var(--danger)"></div>
 </section>
@@ -40,15 +45,15 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <aside class="side">
 <h2>PANELPRIMEPASAR</h2>
 <div class="nav">
-<button onclick="show('dashboard')">📊 داشبورد</button>
-<button onclick="show('customers')">👥 مشتریان</button>
-<button onclick="show('plans')">📦 پلن‌ها</button>
-<button onclick="show('orders')">🧾 سفارش‌ها</button>
-<button onclick="show('payments')">💳 پرداخت‌ها</button>
-<button onclick="show('subscriptions')">🔄 سرویس‌ها</button>
-<button onclick="show('support')">🎧 پشتیبانی</button>
-<button onclick="show('staff')">👮 مدیران</button>
-<button onclick="show('audit')">📜 لاگ‌ها</button>
+<button data-perm="view_dashboard" onclick="show('dashboard')">📊 داشبورد</button>
+<button data-perm="view_users" onclick="show('customers')">👥 مشتریان</button>
+<button data-perm="manage_plans" onclick="show('plans')">📦 پلن‌ها</button>
+<button data-perm="view_orders" onclick="show('orders')">🧾 سفارش‌ها</button>
+<button data-perm="view_payments" onclick="show('payments')">💳 پرداخت‌ها</button>
+<button data-perm="view_orders" onclick="show('subscriptions')">🔄 سرویس‌ها</button>
+<button data-perm="manage_support" onclick="show('support')">🎧 پشتیبانی</button>
+<button data-perm="manage_admins" onclick="show('staff')">👮 مدیران</button>
+<button data-perm="view_audit_logs" onclick="show('audit')">📜 لاگ‌ها</button>
 <button class="danger" onclick="logout()">خروج</button>
 </div>
 </aside>
@@ -61,21 +66,42 @@ input,select{background:#0d1426;color:var(--text);border:1px solid var(--line);b
 <script>
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-function key(){return sessionStorage.getItem('adminKey')||''}
+function token(){return sessionStorage.getItem('adminToken')||''}
+function permissions(){try{return JSON.parse(sessionStorage.getItem('adminPermissions')||'[]')}catch{return []}}
+function applyPermissions(){
+  const allowed=new Set(permissions());
+  document.querySelectorAll('[data-perm]').forEach(el=>el.classList.toggle('hidden',!allowed.has(el.dataset.perm)));
+}
 async function api(path,opts={}){
-  const headers={...(opts.headers||{}),'X-Admin-Key':key()};
+  const headers={...(opts.headers||{})};
+  if(token())headers['Authorization']='Bearer '+token();
   if(opts.body && !headers['Content-Type']) headers['Content-Type']='application/json';
   const r=await fetch(path,{...opts,headers});
-  if(r.status===401){logout();throw new Error('دسترسی نامعتبر')}
+  if(r.status===401){logout();throw new Error('دسترسی نامعتبر یا منقضی‌شده')}
+  if(r.status===403)throw new Error('برای این بخش دسترسی ندارید');
   if(!r.ok){let m='HTTP '+r.status;try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
   return r.status===204?null:r.json()
 }
 async function login(){
-  sessionStorage.setItem('adminKey',$('#key').value);
-  try{await api('/admin/dashboard');$('#login').classList.add('hidden');$('#app').classList.remove('hidden');show('dashboard')}
-  catch(e){sessionStorage.removeItem('adminKey');$('#loginError').textContent=e.message}
+  const username=$('#username').value.trim();
+  const password=$('#password').value;
+  const ownerKey=$('#ownerKey').value;
+  const body=ownerKey?{api_key:ownerKey}:{username,password};
+  try{
+    const auth=await fetch('/admin/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(!auth.ok){let m='ورود ناموفق';try{m=(await auth.json()).detail||m}catch{}throw new Error(m)}
+    const data=await auth.json();
+    sessionStorage.setItem('adminToken',data.token);
+    sessionStorage.setItem('adminPermissions',JSON.stringify(data.permissions||[]));
+    sessionStorage.setItem('adminRole',data.role||'');
+    $('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')
+  }catch(e){
+    sessionStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminPermissions');
+    $('#loginError').textContent=e.message
+  }
 }
-function logout(){sessionStorage.removeItem('adminKey');location.reload()}
+function logout(){sessionStorage.clear();location.reload()}
 function table(rows,cols){
   if(!rows.length)return '<p class="muted">داده‌ای وجود ندارد.</p>';
   return '<div class="table-wrap"><table><thead><tr>'+cols.map(c=>'<th>'+esc(c[0])+'</th>').join('')+'</tr></thead><tbody>'+
@@ -113,7 +139,7 @@ async function createPlan(){
  await api('/admin/plans',{method:'POST',body:JSON.stringify(body)});show('plans')
 }
 async function staffStatus(id,active){await api('/admin/staff/'+id+'/status',{method:'PATCH',body:JSON.stringify({active})});show('staff')}
-if(key()){api('/admin/dashboard').then(()=>{$('#login').classList.add('hidden');$('#app').classList.remove('hidden');show('dashboard')}).catch(()=>sessionStorage.removeItem('adminKey'))}
+if(token()){api('/admin/auth/me').then(me=>{sessionStorage.setItem('adminPermissions',JSON.stringify(me.permissions||[]));$('#login').classList.add('hidden');$('#app').classList.remove('hidden');applyPermissions();show('dashboard')}).catch(()=>sessionStorage.clear())}
 </script>
 </body>
 </html>"""
