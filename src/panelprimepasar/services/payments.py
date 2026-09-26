@@ -196,12 +196,27 @@ async def approve_manual_order(
             f"Order status {order.status.value!r} cannot be manually approved"
         )
 
-    payment = await create_pending_payment(
-        session,
-        order_id=order.id,
-        provider="manual",
-        raw_reference=f"approved-by-telegram:{actor_telegram_id}",
+    payment = await session.scalar(
+        select(Payment)
+        .where(
+            Payment.order_id == order.id,
+            Payment.provider == "manual",
+            Payment.status == PaymentStatus.PENDING,
+        )
+        .order_by(Payment.created_at.desc())
+        .with_for_update()
     )
+    if payment is None:
+        payment = await create_pending_payment(
+            session,
+            order_id=order.id,
+            provider="manual",
+            raw_reference=f"approved-by-telegram:{actor_telegram_id}",
+        )
+    else:
+        payment.raw_reference = f"approved-by-telegram:{actor_telegram_id}"
+        await session.flush()
+
     return await verify_payment(
         session,
         payment_id=payment.id,
