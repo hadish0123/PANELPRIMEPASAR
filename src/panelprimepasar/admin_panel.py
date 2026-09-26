@@ -14,6 +14,8 @@ from panelprimepasar.db import get_session
 from panelprimepasar.models import (
     AuditEvent,
     Customer,
+    DiscountCode,
+    DiscountKind,
     Order,
     OrderKind,
     OrderStatus,
@@ -42,6 +44,10 @@ from panelprimepasar.services.admins import (
     upsert_web_staff_admin,
 )
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.discounts import (
+    DiscountStateError,
+    normalize_discount_code,
+)
 from panelprimepasar.services.wallets import (
     WalletStateError,
     credit_wallet,
@@ -113,6 +119,24 @@ class WalletCreditRequest(BaseModel):
     currency: str = Field(default="IRT", min_length=2, max_length=8)
     idempotency_key: str = Field(min_length=8, max_length=191)
     reference: str | None = Field(default=None, max_length=191)
+
+
+class DiscountCreateRequest(BaseModel):
+    code: str = Field(min_length=2, max_length=64)
+    kind: DiscountKind
+    value_amount: int | None = Field(default=None, gt=0)
+    value_percent: int | None = Field(default=None, ge=1, le=100)
+    max_uses: int | None = Field(default=None, gt=0)
+    expires_at: datetime | None = None
+    is_active: bool = True
+
+
+class DiscountUpdateRequest(BaseModel):
+    value_amount: int | None = Field(default=None, gt=0)
+    value_percent: int | None = Field(default=None, ge=1, le=100)
+    max_uses: int | None = Field(default=None, gt=0)
+    expires_at: datetime | None = None
+    is_active: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -951,6 +975,186 @@ async def support_tickets(
         }
         for row in rows
     ]
+
+
+@router.get("/discounts")
+async def discounts(
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> list[dict[str, object]]:
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_DISCOUNTS,
+    )
+    rows = (
+        await session.scalars(
+            select(DiscountCode).order_by(
+                DiscountCode.created_at.desc(),
+                DiscountCode.id.desc(),
+            )
+        )
+    ).all()
+    return [
+        {
+            "id": str(row.id),
+            "code": row.code,
+            "kind": row.kind,
+            "value_amount": row.value_amount,
+            "value_percent": row.value_percent,
+            "max_uses": row.max_uses,
+            "used_count": row.used_count,
+            "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+            "active": row.is_active,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/discounts", status_code=201)
+async def create_discount(
+    payload: DiscountCreateRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_DISCOUNTS,
+    )
+    try:
+        code = normalize_discount_code(payload.code)
+    except DiscountStateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if payload.kind == DiscountKind.FIXED:
+        if payload.value_amount is None or payload.value_percent is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Fixed discount requires value_amount only",
+            )
+    elif payload.value_percent is None or payload.value_amount is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Percent discount requires value_percent only",
+        )
+
+    duplicate = await session.scalar(
+        select(DiscountCode).where(DiscountCode.code == code)
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="Discount code already exists")
+
+    discount = DiscountCode(
+        code=code,
+        kind=payload.kind.value,
+        value_amount=payload.value_amount,
+        value_percent=payload.value_percent,
+        max_uses=payload.max_uses,
+        used_count=0,
+        expires_at=payload.expires_at,
+        is_active=payload.is_active,
+    )
+    session.add(discount)
+    await session.flush()
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="discount.created",
+        entity_type="discount_code",
+        entity_id=str(discount.id),
+        metadata={"code": discount.code, "kind": discount.kind},
+    )
+    await session.commit()
+    return {"id": str(discount.id), "code": discount.code, "active": discount.is_active}
+
+
+@router.patch("/discounts/{discount_id}")
+async def update_discount(
+    discount_id: UUID,
+    payload: DiscountUpdateRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_DISCOUNTS,
+    )
+    discount = await session.get(DiscountCode, discount_id)
+    if discount is None:
+        raise HTTPException(status_code=404, detail="Discount code not found")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "value_amount" in changes:
+        if discount.kind != DiscountKind.FIXED.value:
+            raise HTTPException(status_code=400, detail="Discount is not fixed")
+        discount.value_amount = changes["value_amount"]
+    if "value_percent" in changes:
+        if discount.kind != DiscountKind.PERCENT.value:
+            raise HTTPException(status_code=400, detail="Discount is not percent")
+        discount.value_percent = changes["value_percent"]
+    if "max_uses" in changes:
+        max_uses = changes["max_uses"]
+        if max_uses is not None and int(max_uses) < discount.used_count:
+            raise HTTPException(
+                status_code=400,
+                detail="max_uses cannot be lower than used_count",
+            )
+        discount.max_uses = max_uses
+    if "expires_at" in changes:
+        discount.expires_at = changes["expires_at"]
+    if "is_active" in changes:
+        discount.is_active = bool(changes["is_active"])
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="discount.updated",
+        entity_type="discount_code",
+        entity_id=str(discount.id),
+        metadata={"fields": sorted(changes)},
+    )
+    await session.commit()
+    return {"id": str(discount.id), "code": discount.code, "active": discount.is_active}
+
+
+@router.delete("/discounts/{discount_id}")
+async def archive_discount(
+    discount_id: UUID,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_DISCOUNTS,
+    )
+    discount = await session.get(DiscountCode, discount_id)
+    if discount is None:
+        raise HTTPException(status_code=404, detail="Discount code not found")
+
+    discount.is_active = False
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="discount.archived",
+        entity_type="discount_code",
+        entity_id=str(discount.id),
+    )
+    await session.commit()
+    return {"id": str(discount.id), "active": False}
 
 
 @router.post("/staff", status_code=201)
