@@ -120,7 +120,11 @@ class PasarGuardAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     customer_id: Mapped[UUID] = mapped_column(ForeignKey("customers.id"), index=True)
     order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), unique=True)
-    pasarguard_admin_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
+    pasarguard_instance_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pasarguard_instances.id"),
+        index=True,
+    )
+    pasarguard_admin_id: Mapped[int | None] = mapped_column(BigInteger)
     username: Mapped[str] = mapped_column(String(128), unique=True)
     role_id: Mapped[int | None] = mapped_column(Integer)
     role_name: Mapped[str | None] = mapped_column(String(128))
