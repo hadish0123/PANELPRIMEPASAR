@@ -111,21 +111,21 @@ async def credit_wallet(
         customer_id=customer_id,
         currency=currency,
     )
-    wallet = await session.scalar(
+    locked_wallet = await session.scalar(
         select(Wallet).where(Wallet.id == wallet.id).with_for_update()
     )
-    if wallet is None:
+    if locked_wallet is None:
         raise WalletStateError("Wallet not found")
 
     transaction = WalletTransaction(
-        wallet_id=wallet.id,
+        wallet_id=locked_wallet.id,
         kind=kind.value,
         amount=amount,
-        currency=wallet.currency,
+        currency=locked_wallet.currency,
         reference=reference,
         idempotency_key=idempotency_key,
     )
-    wallet.balance += amount
+    locked_wallet.balance += amount
     session.add(transaction)
     await session.flush()
     return transaction
@@ -158,23 +158,23 @@ async def debit_wallet(
         customer_id=customer_id,
         currency=currency,
     )
-    wallet = await session.scalar(
+    locked_wallet = await session.scalar(
         select(Wallet).where(Wallet.id == wallet.id).with_for_update()
     )
-    if wallet is None:
+    if locked_wallet is None:
         raise WalletStateError("Wallet not found")
-    if wallet.balance < amount:
+    if locked_wallet.balance < amount:
         raise WalletStateError("Insufficient wallet balance")
 
     transaction = WalletTransaction(
-        wallet_id=wallet.id,
+        wallet_id=locked_wallet.id,
         kind=WalletTransactionKind.DEBIT.value,
         amount=amount,
-        currency=wallet.currency,
+        currency=locked_wallet.currency,
         reference=reference,
         idempotency_key=idempotency_key,
     )
-    wallet.balance -= amount
+    locked_wallet.balance -= amount
     session.add(transaction)
     await session.flush()
     return transaction
