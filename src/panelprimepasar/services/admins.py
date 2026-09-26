@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,7 +85,7 @@ async def upsert_staff_admin(
 async def set_staff_admin_active(
     session: AsyncSession,
     *,
-    staff_id: object,
+    staff_id: UUID,
     is_active: bool,
 ) -> StaffAdmin:
     staff = await session.get(StaffAdmin, staff_id)
