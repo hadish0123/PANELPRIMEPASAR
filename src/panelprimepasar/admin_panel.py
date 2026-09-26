@@ -22,6 +22,8 @@ from panelprimepasar.models import (
     PasarGuardAccount,
     PasarGuardInstance,
     Payment,
+    PaymentMethodConfig,
+    PaymentMethodKind,
     PaymentStatus,
     Plan,
     StaffAdmin,
@@ -50,6 +52,12 @@ from panelprimepasar.services.discounts import (
     normalize_discount_code,
 )
 from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
+from panelprimepasar.services.payment_methods import (
+    PaymentMethodInput,
+    PaymentMethodStateError,
+    configure_payment_method,
+    payment_method_public_view,
+)
 from panelprimepasar.services.wallets import (
     WalletStateError,
     credit_wallet,
@@ -139,6 +147,17 @@ class DiscountUpdateRequest(BaseModel):
     max_uses: int | None = Field(default=None, gt=0)
     expires_at: datetime | None = None
     is_active: bool | None = None
+
+
+class PaymentMethodRequest(BaseModel):
+    slug: str = Field(min_length=2, max_length=24)
+    kind: PaymentMethodKind
+    display_name: str = Field(min_length=1, max_length=128)
+    is_enabled: bool = False
+    sandbox: bool = False
+    sort_order: int = Field(default=0, ge=-1000, le=1000)
+    public_config: dict[str, str] = Field(default_factory=dict)
+    credentials: dict[str, str] | None = None
 
 
 class PasarGuardInstanceCreateRequest(BaseModel):
@@ -821,6 +840,167 @@ async def orders(
         }
         for row in rows
     ]
+
+
+@router.get("/payment-methods")
+async def payment_methods(
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> list[dict[str, object]]:
+    await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PAYMENT_METHODS,
+    )
+    rows = (
+        await session.scalars(
+            select(PaymentMethodConfig).order_by(
+                PaymentMethodConfig.sort_order.asc(),
+                PaymentMethodConfig.created_at.asc(),
+            )
+        )
+    ).all()
+    return [payment_method_public_view(row) for row in rows]
+
+
+@router.post("/payment-methods", status_code=201)
+async def create_payment_method(
+    payload: PaymentMethodRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PAYMENT_METHODS,
+    )
+    try:
+        method = await configure_payment_method(
+            session,
+            settings=get_settings(),
+            values=PaymentMethodInput(
+                slug=payload.slug,
+                kind=payload.kind,
+                display_name=payload.display_name,
+                is_enabled=payload.is_enabled,
+                sandbox=payload.sandbox,
+                sort_order=payload.sort_order,
+                public_config=payload.public_config,
+                credentials=payload.credentials,
+            ),
+        )
+    except PaymentMethodStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="payment_method.created",
+        entity_type="payment_method",
+        entity_id=str(method.id),
+        metadata={
+            "slug": method.slug,
+            "kind": method.kind,
+            "enabled": method.is_enabled,
+            "sandbox": method.sandbox,
+        },
+    )
+    await session.commit()
+    return payment_method_public_view(method)
+
+
+@router.put("/payment-methods/{method_id}")
+async def update_payment_method(
+    method_id: UUID,
+    payload: PaymentMethodRequest,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PAYMENT_METHODS,
+    )
+    existing = await session.get(PaymentMethodConfig, method_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+
+    try:
+        method = await configure_payment_method(
+            session,
+            settings=get_settings(),
+            method_id=method_id,
+            values=PaymentMethodInput(
+                slug=payload.slug,
+                kind=payload.kind,
+                display_name=payload.display_name,
+                is_enabled=payload.is_enabled,
+                sandbox=payload.sandbox,
+                sort_order=payload.sort_order,
+                public_config=payload.public_config,
+                credentials=payload.credentials,
+            ),
+        )
+    except PaymentMethodStateError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="payment_method.updated",
+        entity_type="payment_method",
+        entity_id=str(method.id),
+        metadata={
+            "slug": method.slug,
+            "kind": method.kind,
+            "enabled": method.is_enabled,
+            "sandbox": method.sandbox,
+            "credentials_replaced": payload.credentials is not None,
+        },
+    )
+    await session.commit()
+    return payment_method_public_view(method)
+
+
+@router.delete("/payment-methods/{method_id}")
+async def disable_payment_method(
+    method_id: UUID,
+    session: SessionDep,
+    x_admin_key: AdminKeyHeader = None,
+    authorization: AdminAuthorizationHeader = None,
+) -> dict[str, object]:
+    principal = await _require_web_permission(
+        session,
+        api_key=x_admin_key,
+        authorization=authorization,
+        permission=Permission.MANAGE_PAYMENT_METHODS,
+    )
+    method = await session.get(PaymentMethodConfig, method_id)
+    if method is None:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+
+    method.is_enabled = False
+    await record_audit_event(
+        session,
+        actor_type="web_admin",
+        actor_id=str(principal.staff_id) if principal.staff_id is not None else "owner",
+        action="payment_method.disabled",
+        entity_type="payment_method",
+        entity_id=str(method.id),
+        metadata={"slug": method.slug, "kind": method.kind},
+    )
+    await session.commit()
+    return payment_method_public_view(method)
 
 
 @router.get("/payments")
