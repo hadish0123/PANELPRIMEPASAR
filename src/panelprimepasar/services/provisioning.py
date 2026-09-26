@@ -362,6 +362,34 @@ class ProvisioningService:
                 error_message=job.last_error_message,
             )
 
+        collision_query = select(PasarGuardAccount).where(
+            PasarGuardAccount.pasarguard_admin_id == admin.id,
+            PasarGuardAccount.order_id != order.id,
+        )
+        if self.pasarguard_instance_id is None:
+            collision_query = collision_query.where(
+                PasarGuardAccount.pasarguard_instance_id.is_(None)
+            )
+        else:
+            collision_query = collision_query.where(
+                PasarGuardAccount.pasarguard_instance_id
+                == self.pasarguard_instance_id
+            )
+        collision = await session.scalar(collision_query)
+        if collision is not None:
+            job.status = ProvisioningStatus.FAILED
+            job.last_error_code = "PasarGuardAdminIdCollision"
+            job.last_error_message = (
+                "PasarGuard returned an admin ID already assigned to another order"
+            )
+            order.status = OrderStatus.FAILED
+            await session.flush()
+            return ProvisioningOutcome(
+                success=False,
+                error_code=job.last_error_code,
+                error_message=job.last_error_message,
+            )
+
         account = PasarGuardAccount(
             customer_id=customer.id,
             order_id=order.id,
