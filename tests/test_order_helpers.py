@@ -2,6 +2,7 @@ from uuid import UUID
 
 from panelprimepasar.routers.customer import format_money, format_quota
 from panelprimepasar.services.orders import checkout_idempotency_key
+from panelprimepasar.services.subscriptions import combined_quota_bytes
 
 
 def test_checkout_idempotency_key_is_deterministic() -> None:
@@ -22,9 +23,16 @@ def test_checkout_idempotency_key_is_deterministic() -> None:
     assert first.endswith(str(plan_id))
 
 
-def test_quota_formatter_preserves_decimal_and_binary_units() -> None:
-    assert format_quota(1_000_000_000_000) == "1 TB"
-    assert format_quota(1_099_511_627_776) == "1 TiB"
+def test_quota_formatter_always_uses_entered_gigabytes() -> None:
+    assert format_quota(1_000_000_000_000) == "1000 GB"
+    assert format_quota(500_000_000_000) == "500 GB"
+    assert format_quota(0) == "نامحدود"
+
+
+def test_combining_any_quota_with_unlimited_stays_unlimited() -> None:
+    assert combined_quota_bytes(500_000_000_000, 0) == 0
+    assert combined_quota_bytes(0, 100_000_000_000) == 0
+    assert combined_quota_bytes(500_000_000_000, 100_000_000_000) == 600_000_000_000
 
 
 def test_money_formatter_does_not_mix_rial_and_toman() -> None:

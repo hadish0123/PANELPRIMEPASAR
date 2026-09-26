@@ -67,6 +67,10 @@ Minimal provisioning payload:
 The actual production role ID is not hard-coded. It is resolved from the live
 PasarGuard role list and validated before provisioning.
 
+`data_limit` is always sent in bytes. A plan entered as `500` GB is therefore
+sent as `500000000000`. A value of `0` is sent unchanged and means unlimited
+traffic. PasarGuard does not receive or enforce a day-based expiry.
+
 ## Admin modification
 
 `PUT /api/admin/by-id/{admin_id}`

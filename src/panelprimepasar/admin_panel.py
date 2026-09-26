@@ -103,20 +103,18 @@ PaymentStatusQuery = Annotated[PaymentStatus | None, Query(alias="status")]
 
 class PlanCreateRequest(BaseModel):
     name: str = Field(min_length=2, max_length=128)
-    quota_bytes: int = Field(gt=0)
+    quota_bytes: int = Field(ge=0)
     price_amount: int = Field(ge=0)
     currency: str = Field(default="IRT", min_length=2, max_length=8)
-    validity_days: int | None = Field(default=None, gt=0)
     is_active: bool = True
     sort_order: int = 0
 
 
 class PlanUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=128)
-    quota_bytes: int | None = Field(default=None, gt=0)
+    quota_bytes: int | None = Field(default=None, ge=0)
     price_amount: int | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, min_length=2, max_length=8)
-    validity_days: int | None = Field(default=None, gt=0)
     is_active: bool | None = None
     sort_order: int | None = None
 
@@ -902,7 +900,6 @@ async def plans(
             "quota_bytes": row.quota_bytes,
             "price_amount": row.price_amount,
             "currency": row.currency,
-            "validity_days": row.validity_days,
             "active": row.is_active,
             "sort_order": row.sort_order,
         }
@@ -935,7 +932,7 @@ async def create_plan(
         quota_bytes=payload.quota_bytes,
         price_amount=payload.price_amount,
         currency=payload.currency.upper(),
-        validity_days=payload.validity_days,
+        validity_days=None,
         is_active=payload.is_active,
         sort_order=payload.sort_order,
     )
@@ -980,8 +977,6 @@ async def update_plan(
         plan.price_amount = int(changes["price_amount"])
     if "currency" in changes:
         plan.currency = str(changes["currency"]).upper()
-    if "validity_days" in changes:
-        plan.validity_days = changes["validity_days"]
     if "is_active" in changes:
         plan.is_active = bool(changes["is_active"])
     if "sort_order" in changes:

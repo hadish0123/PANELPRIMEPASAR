@@ -672,13 +672,13 @@ const views={
  },
  plans:async()=>{
   const rows=await api('/admin/plans');
-  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" maxlength="128" placeholder="نام"><input id="pquota" type="number" min="1" inputmode="numeric" placeholder="حجم بایت"><input id="pprice" type="number" min="0" inputmode="numeric" placeholder="قیمت تومان"><input id="pdays" type="number" min="1" inputmode="numeric" placeholder="روز"><button type="button" class="btn small" onclick="createPlan(this)">➕ ساخت</button></div></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['اعتبار',r=>esc(r.validity_days??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
+  $('#view').innerHTML='<h1>پلن‌ها</h1><div class="card"><div class="toolbar"><input id="pname" maxlength="128" placeholder="نام"><input id="pquota" type="number" min="0" step="0.01" inputmode="decimal" placeholder="حجم (گیگابایت، ۰ = نامحدود)"><input id="pprice" type="number" min="0" inputmode="numeric" placeholder="قیمت تومان"><button type="button" class="btn small" onclick="createPlan(this)">➕ ساخت</button></div><p class="muted">حجم را به گیگابایت وارد کنید. عدد صفر یعنی حجم نامحدود.</p></div>'+table(rows,[['نام',r=>esc(r.name)],['حجم (GB)',r=>formatQuotaGb(r.quota_bytes)],['قیمت',r=>Number(r.price_amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePlan(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
  },
  discounts:async()=>{
   const rows=await api('/admin/discounts');
   $('#view').innerHTML='<h1>کدهای تخفیف</h1><div class="card"><div class="toolbar"><input id="dcode" maxlength="64" placeholder="کد"><select id="dkind"><option value="percent">درصدی</option><option value="fixed">مبلغ ثابت</option></select><input id="dvalue" type="number" min="1" inputmode="numeric" placeholder="مقدار"><input id="dmax" type="number" min="1" inputmode="numeric" placeholder="حداکثر استفاده"><button type="button" class="btn small" onclick="createDiscount(this)">➕ ساخت</button></div></div>'+table(rows,[['کد',r=>'<code>'+esc(r.code)+'</code>'],['نوع',r=>esc(r.kind)],['مقدار',r=>r.kind==='percent'?esc(r.value_percent)+'%':Number(r.value_amount||0).toLocaleString()],['استفاده',r=>esc(r.used_count)+' / '+esc(r.max_uses??'∞')],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="toggleDiscount(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])
  },
- orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['عملیات',r=>'<button type="button" class="btn small" onclick="orderActionMenu(\''+r.id+'\',this)">⚙️ عملیات</button><div class="muted">'+esc(orderActionHtml(r))+'</div>']])},
+ orders:async()=>{const rows=await api('/admin/orders?limit=100');$('#view').innerHTML='<h1>سفارش‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['نوع',r=>esc(r.kind)],['وضعیت',r=>esc(r.status)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['حجم',r=>formatQuotaGb(r.quota_bytes)],['عملیات',r=>'<button type="button" class="btn small" onclick="orderActionMenu(\''+r.id+'\',this)">⚙️ عملیات</button><div class="muted">'+esc(orderActionHtml(r))+'</div>']])},
  payments:async()=>{const rows=await api('/admin/payments?limit=100');$('#view').innerHTML='<h1>پرداخت‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['درگاه',r=>esc(r.provider)],['مبلغ',r=>Number(r.amount).toLocaleString()+' '+esc(r.currency)],['وضعیت',r=>esc(r.status)],['تراکنش',r=>esc(r.transaction_id)]])},
  paymentMethods:async()=>{
   const rows=await api('/admin/payment-methods');
@@ -711,7 +711,7 @@ const views={
    '<p class="muted">مقدار واقعی API Key در دیتابیس ذخیره نمی‌شود؛ فقط نام متغیر محیطی ثبت می‌شود.</p></div>';
   $('#view').innerHTML='<h1>PasarGuard Instances</h1>'+form+table(rows,[['نام',r=>esc(r.name)],['آدرس',r=>'<code>'+esc(r.base_url)+'</code>'],['وزن',r=>esc(r.weight)],['وضعیت',r=>r.enabled?'✅ فعال':'⛔ غیرفعال'],['Health',r=>r.last_health_ok===true?'🟢 سالم':(r.last_health_ok===false?'🔴 خطا':'—')],['Env',r=>'<code>'+esc(r.api_key_env_var||r.bearer_token_env_var||'')+'</code>'],['عملیات',r=>'<button type="button" class="btn small" onclick="togglePasarguard(\''+r.id+'\','+(!r.enabled)+',this)">'+(r.enabled?'غیرفعال':'فعال')+'</button><button type="button" class="btn small" onclick="editPasarguard(\''+r.id+'\',this)">✏️ ویرایش</button>']])
  },
- subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>Number(r.quota_bytes).toLocaleString()],['انقضا',r=>esc(r.expires_at||'∞')],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
+ subscriptions:async()=>{const rows=await api('/admin/subscriptions?limit=100');$('#view').innerHTML='<h1>سرویس‌ها</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['وضعیت',r=>esc(r.status)],['حجم',r=>formatQuotaGb(r.quota_bytes)],['Auto Renew',r=>r.auto_renew?'✅':'—']])},
  support:async()=>{const rows=await api('/admin/support?limit=100');$('#view').innerHTML='<h1>پشتیبانی</h1>'+table(rows,[['ID',r=>'<code>'+esc(r.id.slice(0,8))+'</code>'],['موضوع',r=>esc(r.subject)],['وضعیت',r=>esc(r.status)],['به‌روزرسانی',r=>esc(r.updated_at)]])},
  staff:async()=>{const rows=await api('/admin/staff');$('#view').innerHTML='<h1>مدیران</h1>'+table(rows,[['Telegram',r=>esc(r.telegram_user_id)],['Username',r=>esc(r.username)],['نقش',r=>esc(r.role)],['وضعیت',r=>r.active?'✅':'⛔'],['عملیات',r=>'<button type="button" class="btn small" onclick="staffStatus(\''+r.id+'\','+(!r.active)+',this)">'+(r.active?'غیرفعال':'فعال')+'</button>']])},
  audit:async()=>{const rows=await api('/admin/audit?limit=100');$('#view').innerHTML='<h1>Audit Log</h1>'+table(rows,[['زمان',r=>esc(r.created_at)],['Actor',r=>esc(r.actor_type)+' '+esc(r.actor_id)],['عملیات',r=>esc(r.action)],['Entity',r=>esc(r.entity_type)+' '+esc(r.entity_id)]])}
@@ -737,6 +737,20 @@ function integerInput(selector,label,min,max=Infinity,optional=false){
  const value=Number(raw);
  if(!raw||!Number.isInteger(value)||value<min||value>max)throw new Error(label+' معتبر نیست.');
  return value
+}
+const GB_BYTES=1_000_000_000;
+function quotaInputBytes(selector){
+ const raw=$(selector).value.trim();
+ const gigabytes=Number(raw);
+ const bytes=Math.round(gigabytes*GB_BYTES);
+ if(!raw||!Number.isFinite(gigabytes)||gigabytes<0||!Number.isSafeInteger(bytes))throw new Error('حجم گیگابایتی معتبر نیست.');
+ return bytes
+}
+function formatQuotaGb(quotaBytes){
+ const bytes=Number(quotaBytes);
+ if(bytes===0)return 'نامحدود';
+ const gigabytes=bytes/GB_BYTES;
+ return gigabytes.toLocaleString('fa-IR',{maximumFractionDigits:2})+' GB'
 }
 function httpUrl(value){
  let parsed;
@@ -788,10 +802,9 @@ async function createPlan(button){
  await runAction(button,async()=>{
    const body={
      name:requiredText('#pname','نام پلن',2,128),
-     quota_bytes:integerInput('#pquota','حجم',1),
+     quota_bytes:quotaInputBytes('#pquota'),
      price_amount:integerInput('#pprice','قیمت',0),
-     currency:'IRT',
-     validity_days:integerInput('#pdays','اعتبار روزانه',1,Infinity,true)
+     currency:'IRT'
    };
    await api('/admin/plans',{method:'POST',body:JSON.stringify(body)});
    await show('plans')

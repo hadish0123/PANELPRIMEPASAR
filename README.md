@@ -19,7 +19,7 @@ Implemented flow:
    `data_limit`.
 8. Credentials are delivered to the customer. Plaintext reseller passwords are never
    persisted.
-9. Subscription renewal, quota top-up, expiry maintenance, support tickets, discounts,
+9. Subscription renewal, quota top-up, support tickets, discounts,
    wallet accounting, and audit events are handled by the same service.
 10. Payment/provisioning transitions are idempotent so duplicate callbacks and retries do
     not create duplicate reseller accounts or double-charge wallet balance.
@@ -139,8 +139,10 @@ Core tables include:
 - `provisioning_jobs`
 - `audit_events`
 
-Quotas are stored in bytes. Plan input explicitly distinguishes decimal `GB/TB` from
-binary `GiB/TiB`. Prices explicitly distinguish `IRT` from `IRR`.
+Quotas are stored in bytes internally, while every plan input and customer-facing value
+uses decimal gigabytes (`GB`). A quota of `0` means unlimited traffic. Plans do not have
+a day-based expiry because PasarGuard does not expose one. Prices explicitly distinguish
+`IRT` from `IRR`.
 
 ## Local quality checks
 

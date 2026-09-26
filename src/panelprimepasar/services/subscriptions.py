@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -43,6 +42,13 @@ class SubscriptionActionOutcome:
     subscription_id: UUID
     error_code: str | None = None
     error_message: str | None = None
+
+
+def combined_quota_bytes(current: int, added: int) -> int:
+    """Combine quotas where zero means unlimited traffic."""
+    if current == 0 or added == 0:
+        return 0
+    return current + added
 
 
 async def list_customer_subscriptions(
@@ -99,7 +105,7 @@ async def create_lifecycle_order(
         price_amount=plan.price_amount,
         currency=plan.currency,
         quota_bytes=plan.quota_bytes,
-        validity_days=plan.validity_days,
+        validity_days=None,
         idempotency_key=idempotency_key,
     )
     try:
@@ -163,7 +169,10 @@ async def apply_paid_lifecycle_order(
 
     try:
         if order.kind == OrderKind.TOPUP:
-            new_quota = account.quota_bytes + order.quota_bytes
+            new_quota = combined_quota_bytes(
+                account.quota_bytes,
+                order.quota_bytes,
+            )
             await client.modify_admin_by_id(
                 account.pasarguard_admin_id,
                 data_limit=new_quota,
@@ -175,17 +184,13 @@ async def apply_paid_lifecycle_order(
         else:
             await client.modify_admin_by_id(
                 account.pasarguard_admin_id,
+                data_limit=order.quota_bytes,
                 status="active",
                 note=f"PANELPRIMEPASAR renewal order {order.id}",
             )
-            now = datetime.now(UTC)
-            if order.validity_days is None:
-                subscription.expires_at = None
-            else:
-                base = now
-                if subscription.expires_at is not None and subscription.expires_at > now:
-                    base = subscription.expires_at
-                subscription.expires_at = base + timedelta(days=order.validity_days)
+            account.quota_bytes = order.quota_bytes
+            subscription.quota_bytes = order.quota_bytes
+            subscription.expires_at = None
             subscription.plan_id = order.plan_id
 
         account.is_active = True

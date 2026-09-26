@@ -24,6 +24,7 @@ from panelprimepasar.services.subscriptions import apply_paid_lifecycle_order
 class PurchaseClient:
     def __init__(self) -> None:
         self.ensure_calls = 0
+        self.data_limits: list[int | None] = []
 
     async def resolve_reseller_role(
         self,
@@ -48,6 +49,7 @@ class PurchaseClient:
     ) -> PasarGuardAdmin:
         del password, note
         self.ensure_calls += 1
+        self.data_limits.append(data_limit)
         return PasarGuardAdmin(
             id=9001,
             username=username,
@@ -64,6 +66,7 @@ class PurchaseClient:
 class LifecycleClient:
     def __init__(self) -> None:
         self.modify_calls = 0
+        self.last_data_limit: int | None = None
 
     async def modify_admin_by_id(
         self,
@@ -77,6 +80,7 @@ class LifecycleClient:
     ) -> PasarGuardAdmin:
         del password, role_id, note
         self.modify_calls += 1
+        self.last_data_limit = data_limit
         return PasarGuardAdmin(
             id=admin_id,
             username="reseller",
@@ -166,6 +170,7 @@ async def test_purchase_payment_to_reseller_provisioning_is_idempotent() -> None
         assert second.already_provisioned is True
         assert repeated_payment.id == payment.id
         assert client.ensure_calls == 1
+        assert client.data_limits == [plan.quota_bytes]
         assert order.status == OrderStatus.COMPLETED
         assert account is not None
         assert account.quota_bytes == plan.quota_bytes
@@ -294,7 +299,7 @@ async def test_renewal_payment_to_lifecycle_fulfillment_is_idempotent() -> None:
         assert client.modify_calls == 1
         assert renewal.status == OrderStatus.COMPLETED
         assert subscription.plan_id == renewal_plan.id
-        assert subscription.expires_at is not None
-        expected = initial_expiry + timedelta(days=30)
-        assert abs((subscription.expires_at - expected).total_seconds()) < 2
+        assert subscription.expires_at is None
+        assert subscription.quota_bytes == renewal_plan.quota_bytes
+        assert client.last_data_limit == renewal_plan.quota_bytes
         await session.rollback()

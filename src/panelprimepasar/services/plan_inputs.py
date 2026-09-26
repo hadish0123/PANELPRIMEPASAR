@@ -6,7 +6,10 @@ _DIGIT_TRANSLATION = str.maketrans(
     "01234567890123456789",
 )
 
-_QUOTA_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(GB|TB|GIB|TIB)$", re.IGNORECASE)
+_QUOTA_RE = re.compile(
+    r"^([0-9]+(?:\.[0-9]+)?)(GB|TB|GIB|TIB)?$",
+    re.IGNORECASE,
+)
 
 _QUOTA_MULTIPLIERS = {
     "GB": 1_000_000_000,
@@ -29,17 +32,21 @@ def parse_quota(value: str) -> int:
     normalized = normalize_digits(value).replace(" ", "")
     match = _QUOTA_RE.fullmatch(normalized)
     if match is None:
-        raise ValueError("حجم باید مثل 500GB، 1TB، 500GiB یا 1TiB وارد شود.")
+        raise ValueError(
+            "حجم را به گیگابایت وارد کنید؛ مثل 500 یا عدد 0 برای نامحدود."
+        )
 
     try:
         amount = Decimal(match.group(1))
     except InvalidOperation as exc:
         raise ValueError("مقدار حجم معتبر نیست.") from exc
 
-    if amount <= 0:
-        raise ValueError("حجم باید بزرگ‌تر از صفر باشد.")
+    if amount < 0:
+        raise ValueError("حجم نمی‌تواند منفی باشد.")
+    if amount == 0:
+        return 0
 
-    unit = match.group(2).upper()
+    unit = (match.group(2) or "GB").upper()
     byte_value = amount * _QUOTA_MULTIPLIERS[unit]
     if byte_value != byte_value.to_integral_value():
         raise ValueError("حجم واردشده به تعداد صحیح بایت تبدیل نمی‌شود.")

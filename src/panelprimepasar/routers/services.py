@@ -45,13 +45,14 @@ def _format_money(amount: int, currency: str) -> str:
 
 
 def _format_quota(quota_bytes: int) -> str:
-    decimal_tb = 1_000_000_000_000
+    if quota_bytes == 0:
+        return "نامحدود"
+
     decimal_gb = 1_000_000_000
-    if quota_bytes % decimal_tb == 0:
-        return f"{quota_bytes // decimal_tb} TB"
     if quota_bytes % decimal_gb == 0:
         return f"{quota_bytes // decimal_gb} GB"
-    return f"{quota_bytes / decimal_gb:.2f} GB"
+    value = f"{quota_bytes / decimal_gb:.2f}".rstrip("0").rstrip(".")
+    return f"{value} GB"
 
 
 async def _customer_for_user(
@@ -157,11 +158,6 @@ async def service_details(
         return
 
     plan = await session.scalar(select(Plan).where(Plan.id == subscription.plan_id))
-    expires = (
-        subscription.expires_at.strftime("%Y-%m-%d")
-        if subscription.expires_at is not None
-        else "بدون محدودیت"
-    )
     plan_name = escape(plan.name) if plan is not None else "پلن حذف‌شده"
     status_label = {
         SubscriptionStatus.ACTIVE.value: "فعال",
@@ -175,8 +171,7 @@ async def service_details(
         f"<b>{plan_name}</b>\n"
         f"شناسه سرویس: <code>{subscription.id}</code>\n"
         f"وضعیت: <b>{status_label}</b>\n"
-        f"حجم ثبت‌شده: <b>{_format_quota(subscription.quota_bytes)}</b>\n"
-        f"انقضا: <b>{expires}</b>",
+        f"حجم ثبت‌شده: <b>{_format_quota(subscription.quota_bytes)}</b>",
         reply_markup=subscription_actions_keyboard(subscription.id),
     )
 

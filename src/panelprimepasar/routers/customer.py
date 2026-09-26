@@ -50,20 +50,14 @@ def format_money(amount: int, currency: str) -> str:
 
 
 def format_quota(quota_bytes: int) -> str:
-    decimal_tb = 1_000_000_000_000
-    decimal_gb = 1_000_000_000
-    binary_tib = 1_099_511_627_776
-    binary_gib = 1_073_741_824
+    if quota_bytes == 0:
+        return "نامحدود"
 
-    if quota_bytes % decimal_tb == 0:
-        return f"{quota_bytes // decimal_tb} TB"
-    if quota_bytes % binary_tib == 0:
-        return f"{quota_bytes // binary_tib} TiB"
+    decimal_gb = 1_000_000_000
     if quota_bytes % decimal_gb == 0:
         return f"{quota_bytes // decimal_gb} GB"
-    if quota_bytes % binary_gib == 0:
-        return f"{quota_bytes // binary_gib} GiB"
-    return f"{quota_bytes / decimal_gb:.2f} GB"
+    value = f"{quota_bytes / decimal_gb:.2f}".rstrip("0").rstrip(".")
+    return f"{value} GB"
 
 
 def order_status_label(status: OrderStatus) -> str:
@@ -168,16 +162,10 @@ async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.message.answer("این پلن دیگر فعال نیست.")
         return
 
-    validity = (
-        f"{plan.validity_days} روز"
-        if plan.validity_days is not None
-        else "بدون محدودیت زمانی ثبت‌شده"
-    )
     text = (
         f"<b>{escape(plan.name)}</b>\n"
         f"حجم: <b>{format_quota(plan.quota_bytes)}</b>\n"
-        f"قیمت: <b>{format_money(plan.price_amount, plan.currency)}</b>\n"
-        f"اعتبار: <b>{validity}</b>"
+        f"قیمت: <b>{format_money(plan.price_amount, plan.currency)}</b>"
     )
     await callback.message.edit_text(
         text,

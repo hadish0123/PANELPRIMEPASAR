@@ -107,6 +107,41 @@ async def test_create_admin_includes_role_and_data_limit() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_admin_sends_zero_data_limit_for_unlimited() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["data_limit"] == 0
+        return httpx.Response(
+            201,
+            json={
+                "id": 43,
+                "username": "unlimited_customer",
+                "data_limit": 0,
+                "status": "active",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://panel.example",
+    ) as http_client:
+        client = PasarGuardClient(
+            base_url="https://panel.example",
+            api_key="pg_key_test",
+            client=http_client,
+        )
+        admin = await client.create_admin(
+            username="unlimited_customer",
+            password="strong-password",
+            role_id=7,
+            data_limit=0,
+        )
+
+    assert admin.data_limit == 0
+
+
+@pytest.mark.asyncio
 async def test_permission_error_is_typed() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"detail": "Permission denied"})

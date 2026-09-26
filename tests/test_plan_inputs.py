@@ -12,11 +12,18 @@ def test_normalize_persian_digits() -> None:
     assert normalize_digits("۱۲۳۴۵") == "12345"
 
 
-def test_parse_decimal_and_binary_quota_units() -> None:
+def test_parse_gigabyte_input_and_legacy_units() -> None:
+    assert parse_quota("500") == 500_000_000_000
+    assert parse_quota("۲۵۰") == 250_000_000_000
     assert parse_quota("1TB") == 1_000_000_000_000
     assert parse_quota("500 GB") == 500_000_000_000
     assert parse_quota("1TiB") == 1_099_511_627_776
     assert parse_quota("۲۵۰GiB") == 268_435_456_000
+
+
+def test_zero_quota_means_unlimited() -> None:
+    assert parse_quota("0") == 0
+    assert parse_quota("۰GB") == 0
 
 
 def test_parse_toman_price_with_separators() -> None:

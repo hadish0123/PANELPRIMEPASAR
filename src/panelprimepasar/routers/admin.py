@@ -38,7 +38,6 @@ from panelprimepasar.services.payments import (
 from panelprimepasar.services.plan_inputs import (
     parse_price_toman,
     parse_quota,
-    parse_validity_days,
 )
 from panelprimepasar.services.provisioning import (
     ProvisioningOutcome,
@@ -54,7 +53,6 @@ class PlanForm(StatesGroup):
     name = State()
     quota = State()
     price = State()
-    validity = State()
 
 
 async def _has_permission(
@@ -527,10 +525,8 @@ async def create_plan_name(
     await state.update_data(name=name)
     await state.set_state(PlanForm.quota)
     await message.answer(
-        "حجم را با واحد وارد کنید. مثال:\n"
-        "<code>500GB</code>\n"
-        "<code>1TB</code>\n"
-        "<code>1TiB</code>"
+        "حجم را به گیگابایت وارد کنید. مثال: <code>500</code>\n"
+        "برای حجم نامحدود عدد <code>0</code> را بفرستید."
     )
 
 
@@ -581,39 +577,9 @@ async def create_plan_price(
         await message.answer(str(exc))
         return
 
-    await state.update_data(price_amount=price_amount)
-    await state.set_state(PlanForm.validity)
-    await message.answer(
-        "اعتبار پلن را به روز وارد کنید. "
-        "برای بدون محدودیت زمانی عدد <code>0</code> بفرستید."
-    )
-
-
-@router.message(PlanForm.validity)
-async def create_plan_validity(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-) -> None:
-    user = message.from_user
-    if user is None or not await _has_permission(
-        session,
-        user_id=user.id,
-        permission=Permission.MANAGE_PLANS,
-    ):
-        await _reject_message(message)
-        return
-
-    try:
-        validity_days = parse_validity_days(message.text or "")
-    except ValueError as exc:
-        await message.answer(str(exc))
-        return
-
     data = await state.get_data()
     name = str(data["name"])
     quota_bytes = int(data["quota_bytes"])
-    price_amount = int(data["price_amount"])
 
     duplicate = await session.scalar(select(Plan).where(Plan.name == name))
     if duplicate is not None:
@@ -626,7 +592,7 @@ async def create_plan_validity(
         quota_bytes=quota_bytes,
         price_amount=price_amount,
         currency="IRT",
-        validity_days=validity_days,
+        validity_days=None,
         is_active=True,
         sort_order=0,
     )
@@ -644,22 +610,15 @@ async def create_plan_validity(
             "quota_bytes": plan.quota_bytes,
             "price_amount": plan.price_amount,
             "currency": plan.currency,
-            "validity_days": plan.validity_days,
         },
     )
     await state.clear()
 
-    validity_text = (
-        f"{validity_days} روز"
-        if validity_days is not None
-        else "بدون محدودیت"
-    )
     await message.answer(
         "پلن ساخته شد.\n\n"
         f"نام: <b>{escape(plan.name)}</b>\n"
         f"حجم: <b>{format_quota(plan.quota_bytes)}</b>\n"
-        f"قیمت: <b>{format_money(plan.price_amount, plan.currency)}</b>\n"
-        f"اعتبار: <b>{validity_text}</b>",
+        f"قیمت: <b>{format_money(plan.price_amount, plan.currency)}</b>",
         reply_markup=admin_menu(),
     )
 

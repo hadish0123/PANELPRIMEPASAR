@@ -83,7 +83,7 @@ async def get_or_create_checkout_order(
         price_amount=plan.price_amount,
         currency=plan.currency,
         quota_bytes=plan.quota_bytes,
-        validity_days=plan.validity_days,
+        validity_days=None,
         idempotency_key=idempotency_key,
     )
 

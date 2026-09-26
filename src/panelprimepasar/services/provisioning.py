@@ -2,7 +2,7 @@ import random
 import secrets
 import string
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -144,11 +144,6 @@ class ProvisioningService:
             return subscription
 
         starts_at = datetime.now(UTC)
-        expires_at = (
-            starts_at + timedelta(days=order.validity_days)
-            if order.validity_days is not None
-            else None
-        )
         subscription = Subscription(
             customer_id=order.customer_id,
             plan_id=order.plan_id,
@@ -157,7 +152,7 @@ class ProvisioningService:
             status=SubscriptionStatus.ACTIVE.value,
             quota_bytes=order.quota_bytes,
             starts_at=starts_at,
-            expires_at=expires_at,
+            expires_at=None,
             auto_renew=False,
         )
         session.add(subscription)

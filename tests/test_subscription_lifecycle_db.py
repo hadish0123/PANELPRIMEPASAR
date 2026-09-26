@@ -173,7 +173,7 @@ async def test_topup_increases_pasarguard_quota() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_renewal_extends_from_existing_future_expiry() -> None:
+async def test_renewal_replaces_quota_and_removes_expiry() -> None:
     current_expiry = datetime.now(UTC) + timedelta(days=10)
     customer, _, _, subscription = await _seed_subscription(
         expires_at=current_expiry
@@ -183,7 +183,7 @@ async def test_renewal_extends_from_existing_future_expiry() -> None:
     async with SessionFactory() as session:
         renewal_plan = Plan(
             name=f"renew-{marker}",
-            quota_bytes=500_000_000_000,
+            quota_bytes=300_000_000_000,
             price_amount=80_000,
             currency="IRT",
             validity_days=30,
@@ -218,9 +218,9 @@ async def test_renewal_extends_from_existing_future_expiry() -> None:
 
         assert outcome.success is True
         assert refreshed is not None
-        assert refreshed.expires_at is not None
-        expected = current_expiry + timedelta(days=30)
-        assert abs((refreshed.expires_at - expected).total_seconds()) < 2
+        assert refreshed.expires_at is None
+        assert refreshed.quota_bytes == 300_000_000_000
+        assert client.calls[0]["data_limit"] == 300_000_000_000
         assert refreshed.plan_id == renewal_plan.id
         assert refreshed.status == SubscriptionStatus.ACTIVE.value
         await session.rollback()
