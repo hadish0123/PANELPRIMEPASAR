@@ -119,7 +119,7 @@ async def admin_session_cookie_auth(
             headers.append(
                 (
                     b"authorization",
-                    f"Bearer {token}".encode("utf-8"),
+                    f"Bearer {token}".encode(),
                 )
             )
             request.scope["headers"] = headers
