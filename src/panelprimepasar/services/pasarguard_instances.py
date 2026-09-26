@@ -196,7 +196,7 @@ class PasarGuardInstanceRouter:
             fallback = self._global_target()
         except PasarGuardConfigurationError:
             if last_error is not None:
-                raise last_error
+                raise last_error from None
             raise PasarGuardConfigurationError(
                 "No healthy configured PasarGuard instance is available"
             ) from None
