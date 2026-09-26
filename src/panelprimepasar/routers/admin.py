@@ -22,11 +22,13 @@ from panelprimepasar.keyboards.admin import (
     admin_orders_keyboard,
     admin_plans_keyboard,
 )
-from panelprimepasar.models import Customer, Order, OrderKind, Plan
+from panelprimepasar.models import Customer, Order, OrderKind, PasarGuardAccount, Plan
 from panelprimepasar.routers.customer import format_money, format_quota, order_status_label
 from panelprimepasar.security import Permission
 from panelprimepasar.services.admins import admin_has_permission
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
 from panelprimepasar.services.payments import (
     PaymentStateError,
     approve_manual_order,
@@ -43,10 +45,7 @@ from panelprimepasar.services.provisioning import (
     ProvisioningService,
     ProvisioningStateError,
 )
-from panelprimepasar.services.subscriptions import (
-    SubscriptionStateError,
-    apply_paid_lifecycle_order,
-)
+from panelprimepasar.services.subscriptions import SubscriptionStateError
 
 router = Router(name="admin")
 
@@ -165,8 +164,19 @@ async def _run_provisioning(
         return
     _, customer = order_customer
 
+    instance_router = PasarGuardInstanceRouter(settings=settings)
+    account = await session.scalar(
+        select(PasarGuardAccount).where(PasarGuardAccount.order_id == order_id)
+    )
     try:
-        client = build_pasarguard_client(settings)
+        target = (
+            await instance_router.target_for_account(session, account=account)
+            if account is not None
+            else await instance_router.select_for_new_order(
+                session,
+                routing_key=str(order_id),
+            )
+        )
     except PasarGuardConfigurationError as exc:
         await callback.message.answer(
             "اتصال PasarGuard هنوز تنظیم نشده است.\n"
@@ -175,9 +185,10 @@ async def _run_provisioning(
         return
 
     service = ProvisioningService(
-        client=client,
-        reseller_role_id=settings.pasarguard_reseller_role_id,
-        reseller_role_name=settings.pasarguard_reseller_role_name,
+        client=target.client,
+        reseller_role_id=target.reseller_role_id,
+        reseller_role_name=target.reseller_role_name,
+        pasarguard_instance_id=target.instance_id,
     )
 
     try:
@@ -199,7 +210,7 @@ async def _run_provisioning(
         )
         return
     finally:
-        await client.close()
+        await target.client.close()
 
     action = "credentials.reissued" if reissue else "provisioning.succeeded"
     if not outcome.success:
@@ -297,23 +308,14 @@ async def _run_order_fulfillment(
 
     settings = get_settings()
     try:
-        client = build_pasarguard_client(settings)
-    except PasarGuardConfigurationError as exc:
-        await callback.message.answer(
-            "اتصال PasarGuard هنوز تنظیم نشده است.\n"
-            f"<code>{escape(str(exc))}</code>"
-        )
-        return
-
-    try:
-        outcome = await apply_paid_lifecycle_order(
+        outcome = await fulfill_paid_order(
             session,
+            settings=settings,
             order_id=order_id,
-            client=client,
         )
         await record_audit_event(
             session,
-            actor_type="telegram_owner",
+            actor_type="telegram_staff",
             actor_id=str(callback.from_user.id),
             action=(
                 "subscription.lifecycle_succeeded"
@@ -325,20 +327,22 @@ async def _run_order_fulfillment(
             correlation_id=str(order_id),
             metadata={
                 "order_kind": order.kind.value,
-                "subscription_id": str(outcome.subscription_id),
+                "subscription_id": (
+                    str(order.target_subscription_id)
+                    if order.target_subscription_id is not None
+                    else None
+                ),
                 "error_code": outcome.error_code,
             },
         )
         await session.commit()
-    except (SubscriptionStateError, PasarGuardError) as exc:
+    except (SubscriptionStateError, ProvisioningStateError, PasarGuardError) as exc:
         await session.rollback()
         await callback.message.answer(
             "عملیات سرویس اجرا نشد.\n"
             f"<code>{escape(str(exc))}</code>"
         )
         return
-    finally:
-        await client.close()
 
     if not outcome.success:
         await callback.message.answer(
