@@ -89,6 +89,11 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(8))
     quota_bytes: Mapped[int] = mapped_column(BigInteger)
     validity_days: Mapped[int | None] = mapped_column(Integer)
+    discount_code_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("discount_codes.id"),
+        index=True,
+    )
+    discount_amount: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
 
 
