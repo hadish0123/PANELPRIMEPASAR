@@ -47,7 +47,8 @@ def _page(title: str, message: str, *, ok: bool) -> HTMLResponse:
 <title>{escape(title)}</title>
 <style>
 body{{font-family:system-ui,sans-serif;background:#0b1020;color:#f2f6ff;margin:0;padding:32px}}
-.card{{max-width:560px;margin:10vh auto;background:#121a2d;border:1px solid #25304a;border-radius:16px;padding:24px}}
+.card{{max-width:560px;margin:10vh auto;background:#121a2d;
+border:1px solid #25304a;border-radius:16px;padding:24px}}
 h1{{color:{accent}}}p{{line-height:1.9}}code{{direction:ltr;display:inline-block}}
 </style>
 </head>
