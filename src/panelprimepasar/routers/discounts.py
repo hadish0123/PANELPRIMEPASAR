@@ -19,6 +19,7 @@ from panelprimepasar.services.discounts import (
     reserve_discount_for_order,
 )
 from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.payments import PaymentStateError, settle_zero_price_order
 from panelprimepasar.services.provisioning import ProvisioningStateError
@@ -112,11 +113,16 @@ async def _deliver_free_order(
         return
 
     settings = get_settings()
+    panel_url = await resolve_order_panel_url(
+        session,
+        settings=settings,
+        order_id=order.id,
+    )
     try:
         await bot.send_message(
             customer.telegram_user_id,
             "<b>پنل نمایندگی شما آماده است.</b>\n\n"
-            f"آدرس پنل: <code>{escape(str(settings.pasarguard_base_url).rstrip('/'))}</code>\n"
+            f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
             f"نام کاربری: <code>{escape(credentials.username)}</code>\n"
             f"رمز عبور: <code>{escape(credentials.password)}</code>\n\n"
             "رمز را در محل امن نگه‌داری کنید.",
