@@ -107,6 +107,8 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     provider: Mapped[str] = mapped_column(String(32))
     provider_transaction_id: Mapped[str | None] = mapped_column(String(191), unique=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(191), index=True)
+    payment_url: Mapped[str | None] = mapped_column(String(1024))
     amount: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(8))
     status: Mapped[PaymentStatus] = mapped_column(
