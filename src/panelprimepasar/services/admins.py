@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.config import get_settings
 from panelprimepasar.models import StaffAdmin
-from panelprimepasar.security import AdminRole, Permission, has_permission
+from panelprimepasar.security import (
+    AdminRole,
+    Permission,
+    hash_password,
+    has_permission,
+    verify_password,
+)
 
 
 class AdminAccessError(RuntimeError):
@@ -105,3 +111,111 @@ async def list_staff_admins(session: AsyncSession) -> list[StaffAdmin]:
         )
     )
     return list(rows.all())
+
+
+
+async def get_web_staff_admin(
+    session: AsyncSession,
+    *,
+    username: str,
+) -> StaffAdmin | None:
+    normalized = username.strip().casefold()
+    if not normalized:
+        return None
+    return await session.scalar(
+        select(StaffAdmin).where(
+            StaffAdmin.login_username == normalized,
+            StaffAdmin.is_active.is_(True),
+        )
+    )
+
+
+async def authenticate_web_staff(
+    session: AsyncSession,
+    *,
+    username: str,
+    password: str,
+) -> StaffAdmin | None:
+    staff = await get_web_staff_admin(session, username=username)
+    if staff is None or not verify_password(password, staff.password_hash):
+        return None
+    return staff
+
+
+async def upsert_web_staff_admin(
+    session: AsyncSession,
+    *,
+    username: str,
+    password: str,
+    role: AdminRole,
+    telegram_user_id: int | None = None,
+    note: str | None = None,
+) -> StaffAdmin:
+    if role == AdminRole.OWNER:
+        raise AdminAccessError(
+            "Owner access is configured through ADMIN_PANEL_API_KEY."
+        )
+
+    normalized = username.strip().casefold()
+    if len(normalized) < 3 or len(normalized) > 64:
+        raise AdminAccessError("Web admin username must be between 3 and 64 characters")
+    if not all(ch.isalnum() or ch in {"_", "-", "."} for ch in normalized):
+        raise AdminAccessError("Web admin username contains unsupported characters")
+
+    existing_by_username = await session.scalar(
+        select(StaffAdmin).where(StaffAdmin.login_username == normalized)
+    )
+    existing_by_telegram = None
+    if telegram_user_id is not None:
+        existing_by_telegram = await session.scalar(
+            select(StaffAdmin).where(
+                StaffAdmin.telegram_user_id == telegram_user_id
+            )
+        )
+
+    if (
+        existing_by_username is not None
+        and existing_by_telegram is not None
+        and existing_by_username.id != existing_by_telegram.id
+    ):
+        raise AdminAccessError("Username and Telegram ID belong to different staff records")
+
+    staff = existing_by_username or existing_by_telegram
+    if staff is None:
+        staff = StaffAdmin(
+            telegram_user_id=telegram_user_id,
+            login_username=normalized,
+            password_hash=hash_password(password),
+            role=role.value,
+            is_active=True,
+            note=note,
+        )
+        session.add(staff)
+    else:
+        staff.login_username = normalized
+        staff.password_hash = hash_password(password)
+        staff.role = role.value
+        staff.is_active = True
+        staff.note = note
+        if telegram_user_id is not None:
+            staff.telegram_user_id = telegram_user_id
+
+    await session.flush()
+    return staff
+
+
+async def set_web_staff_password(
+    session: AsyncSession,
+    *,
+    staff_id: UUID,
+    password: str,
+) -> StaffAdmin:
+    staff = await session.get(StaffAdmin, staff_id)
+    if staff is None:
+        raise AdminAccessError("Staff admin not found.")
+    if staff.login_username is None:
+        raise AdminAccessError("Staff admin does not have a web username")
+
+    staff.password_hash = hash_password(password)
+    await session.flush()
+    return staff
