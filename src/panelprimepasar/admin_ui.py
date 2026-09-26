@@ -1,6 +1,9 @@
 # ruff: noqa: E501
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+
+from panelprimepasar.config import get_settings
+from panelprimepasar.security import WebAdminSecurityError, verify_session_token
 
 router = APIRouter(prefix="/admin", include_in_schema=False)
 
@@ -795,8 +798,32 @@ async def admin_root() -> RedirectResponse:
 
 
 @router.get("/ui", response_class=HTMLResponse)
-async def admin_ui() -> HTMLResponse:
-    response = HTMLResponse(_ADMIN_HTML)
+async def admin_ui(request: Request) -> HTMLResponse:
+    html = _ADMIN_HTML
+    token = request.cookies.get("panelprimepasar_admin_session")
+    if token:
+        settings = get_settings()
+        secret = settings.admin_panel_session_secret or settings.admin_panel_api_key
+        if secret is not None:
+            try:
+                verify_session_token(
+                    token,
+                    secret=secret.get_secret_value(),
+                )
+            except WebAdminSecurityError:
+                pass
+            else:
+                html = html.replace(
+                    '<section id="login">',
+                    '<section id="login" class="hidden">',
+                    1,
+                ).replace(
+                    '<section id="app" class="hidden">',
+                    '<section id="app">',
+                    1,
+                )
+
+    response = HTMLResponse(html)
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
