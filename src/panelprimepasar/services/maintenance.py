@@ -6,7 +6,7 @@ from uuid import UUID
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
-from sqlalchemy import exists, select
+from sqlalchemy import String, cast, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from panelprimepasar.config import Settings
@@ -180,7 +180,7 @@ async def find_expiry_warnings(
         select(AuditEvent.id).where(
             AuditEvent.action == "subscription.expiry_warning_sent",
             AuditEvent.entity_type == "subscription",
-            AuditEvent.entity_id == Subscription.id.cast(str),
+            AuditEvent.entity_id == cast(Subscription.id, String),
         )
     )
 
