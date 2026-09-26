@@ -1,24 +1,28 @@
 # PANELPRIMEPASAR
 
-Telegram sales, payment-review, and PasarGuard reseller/admin provisioning service.
+Telegram sales, payment, support, wallet, discount, and PasarGuard reseller/admin provisioning service.
 
-## Current MVP
+## Production flow
 
 Implemented flow:
 
 1. Owner creates traffic plans in Telegram.
 2. Customer selects a plan and creates an idempotent order.
-3. Customer uploads a payment receipt.
-4. The receipt is forwarded to configured Telegram owners.
-5. Owner approves the payment from the admin UI.
-6. The order becomes `paid`.
-7. The bot resolves the configured reseller role from the live PasarGuard role list.
-8. The bot creates or reconciles the PasarGuard Admin account with the purchased `data_limit`.
-9. Credentials are delivered to the customer.
-10. Plaintext passwords are not stored. If delivery fails, the owner can rotate and reissue credentials.
-
-No automatic external payment gateway is selected yet. The payment layer is provider-neutral,
-and manual receipt approval is the working MVP provider path.
+3. Customer chooses one of the enabled payment methods: wallet, card-to-card, ZarinPal,
+   IDPay, Zibal, NextPay, or manual receipt flow.
+4. Online gateway callbacks are verified server-side before an order is marked paid.
+5. Manual receipts are reviewed by authorized staff.
+6. The bot resolves the configured reseller role and selects the assigned PasarGuard
+   instance. New orders use weighted healthy-instance routing; renewals/top-ups stay
+   pinned to the original instance.
+7. The bot creates or reconciles the PasarGuard Admin/Reseller account with the purchased
+   `data_limit`.
+8. Credentials are delivered to the customer. Plaintext reseller passwords are never
+   persisted.
+9. Subscription renewal, quota top-up, expiry maintenance, support tickets, discounts,
+   wallet accounting, and audit events are handled by the same service.
+10. Payment/provisioning transitions are idempotent so duplicate callbacks and retries do
+    not create duplicate reseller accounts or double-charge wallet balance.
 
 ## Safety boundary
 
@@ -58,11 +62,32 @@ DATABASE_URL=postgresql+asyncpg://...
 REDIS_URL=redis://...
 ```
 
-Manual payment instructions are plain customer-facing text configured through:
+Manual payment instructions remain available as a fallback:
 
 ```text
 MANUAL_PAYMENT_INSTRUCTIONS=...
 ```
+
+For configurable online gateways:
+
+```text
+PAYMENT_CALLBACK_BASE_URL=https://<public-bot-domain>
+PAYMENT_CREDENTIALS_MASTER_KEY=<random-secret-at-least-32-characters>
+PAYMENT_HTTP_TIMEOUT_SECONDS=15
+```
+
+Gateway credentials are entered from Web Admin and encrypted before storage. The encryption
+master key must only exist in the deployment secret store. Do not rotate it without first
+re-encrypting stored gateway credentials.
+
+Supported configurable payment methods:
+
+- card-to-card (card number / holder / bank / optional IBAN)
+- ZarinPal
+- IDPay
+- Zibal
+- NextPay
+- internal wallet
 
 Required for PasarGuard provisioning:
 
@@ -98,13 +123,19 @@ alembic upgrade head
 
 The production Docker image runs migrations before starting Uvicorn.
 
-Core tables:
+Core tables include:
 
 - `customers`
 - `plans`
 - `orders`
 - `payments`
-- `pasarguard_accounts`
+- `payment_method_configs`
+- `wallets` / `wallet_transactions`
+- `discount_codes` / `discount_redemptions`
+- `pasarguard_instances` / `pasarguard_accounts`
+- `subscriptions`
+- `support_tickets` / `support_messages`
+- `staff_admins`
 - `provisioning_jobs`
 - `audit_events`
 
@@ -124,28 +155,47 @@ docker build -t panelprimepasar:test .
 
 CI also validates a PostgreSQL migration downgrade/upgrade round trip.
 
-## Admin commands
+## Administration
 
-Use `/admin` from a Telegram user ID listed in `TELEGRAM_OWNER_IDS`.
+Telegram administration supports database-backed roles and permissions for Owner, Admin,
+Sales, Finance, and Support staff. Owner IDs remain the bootstrap authority.
 
-The admin UI supports:
+Web Admin supports signed sessions and role-aware access. Owner may bootstrap with
+`ADMIN_PANEL_API_KEY`; staff accounts use username/password credentials.
 
-- plan creation
-- plan enable/disable
-- recent orders
-- manual payment approval
-- provisioning retry
-- credential rotation/reissue
-- read-only PasarGuard diagnostics
+Administration features include:
 
-The read-only admin API accepts `X-Admin-Key`. `GET /admin/customers` supports
-`search` (Telegram username or exact numeric Telegram ID), `blocked`, `offset`,
-and `limit`. `GET /admin/orders` supports `status`, `offset`, and `limit`.
-Both endpoints keep their existing list response format; pagination defaults to
-100 records and caps each request at 100. Invalid filters return HTTP 422.
+- plans, customers, orders, subscriptions, payments, wallet credit, discounts, and audit
+- payment-method creation, update, enable/disable, and encrypted credentials
+- card-to-card destination management
+- support ticket operations
+- staff/RBAC management
+- manual payment approval/rejection and unpaid-order cancellation
+- provisioning retry and credential rotation/reissue
+- multiple PasarGuard instances with weights, health checks, enable/disable, and
+  environment-variable based credentials
+
+For multiple PasarGuard instances, store only the environment-variable name in Web Admin.
+The actual API key/bearer token must be provided as a deployment environment variable.
 
 ## Documentation
 
 - `docs/architecture.md`
 - `docs/roadmap.md`
 - `docs/pasarguard-contract.md`
+
+
+## Production release checklist
+
+Before enabling real sales:
+
+1. Run `alembic upgrade head` against the production PostgreSQL database.
+2. Configure Telegram webhook secret, Redis, database URL, and owner IDs.
+3. Configure PasarGuard credentials and validate the live reseller role.
+4. Set `ADMIN_PANEL_API_KEY`, `ADMIN_PANEL_SESSION_SECRET`, and a strong
+   `PAYMENT_CREDENTIALS_MASTER_KEY`.
+5. Set `PAYMENT_CALLBACK_BASE_URL` to the public HTTPS application origin.
+6. Add payment methods from Web Admin and first validate them in sandbox/test mode when the
+   provider supports it.
+7. Run the full CI suite and verify all jobs are green.
+8. Perform one real low-value purchase, one renewal, and one top-up before opening sales.
