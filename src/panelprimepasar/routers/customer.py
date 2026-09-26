@@ -20,7 +20,6 @@ from panelprimepasar.keyboards.customer import (
 )
 from panelprimepasar.models import Customer, Order, OrderStatus
 from panelprimepasar.services.audit import record_audit_event
-from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
     get_active_plan,
@@ -29,6 +28,7 @@ from panelprimepasar.services.orders import (
     list_customer_orders,
     upsert_customer,
 )
+from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
