@@ -68,6 +68,7 @@ const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function token(){return sessionStorage.getItem('adminToken')||''}
 function permissions(){try{return JSON.parse(sessionStorage.getItem('adminPermissions')||'[]')}catch{return []}}
+function can(permission){return permissions().includes(permission)}
 function applyPermissions(){
   const allowed=new Set(permissions());
   document.querySelectorAll('[data-perm]').forEach(el=>el.classList.toggle('hidden',!allowed.has(el.dataset.perm)));
@@ -119,7 +120,7 @@ const views={
  },
  customers:async()=>{
   const rows=await api('/admin/customers?limit=100');
-  $('#view').innerHTML='<h1>مشتریان</h1>'+table(rows,[['Telegram',r=>'<code>'+esc(r.telegram_user_id)+'</code>'],['Username',r=>esc(r.username)],['نام',r=>esc((r.first_name||'')+' '+(r.last_name||''))],['وضعیت',r=>r.blocked?'🚫 مسدود':'✅ فعال'],['عملیات',r=>'<button class="btn small '+(r.blocked?'':'danger')+'" onclick="blockCustomer(\''+r.id+'\','+(!r.blocked)+')">'+(r.blocked?'رفع مسدودی':'مسدود')+'</button>']])
+  $('#view').innerHTML='<h1>مشتریان</h1>'+table(rows,[['Telegram',r=>'<code>'+esc(r.telegram_user_id)+'</code>'],['Username',r=>esc(r.username)],['نام',r=>esc((r.first_name||'')+' '+(r.last_name||''))],['وضعیت',r=>r.blocked?'🚫 مسدود':'✅ فعال'],['عملیات',r=>(can('manage_users')?'<button class="btn small '+(r.blocked?'':'danger')+'" onclick="blockCustomer(\''+r.id+'\','+(!r.blocked)+')">'+(r.blocked?'رفع مسدودی':'مسدود')+'</button>':'')+(can('manage_wallets')?'<button class="btn small" onclick="walletCredit(\''+r.id+'\')">💰 کیف پول</button>':'')]])
  },
  plans:async()=>{
   const rows=await api('/admin/plans');
@@ -133,6 +134,16 @@ const views={
  audit:async()=>{const rows=await api('/admin/audit?limit=100');$('#view').innerHTML='<h1>Audit Log</h1>'+table(rows,[['زمان',r=>esc(r.created_at)],['Actor',r=>esc(r.actor_type)+' '+esc(r.actor_id)],['عملیات',r=>esc(r.action)],['Entity',r=>esc(r.entity_type)+' '+esc(r.entity_id)]])}
 };
 async function blockCustomer(id,blocked){await api('/admin/customers/'+id+'/block',{method:'PATCH',body:JSON.stringify({blocked})});show('customers')}
+async function walletCredit(id){
+ const wallet=await api('/admin/customers/'+id+'/wallet');
+ const raw=prompt('موجودی فعلی: '+Number(wallet.balance).toLocaleString()+' '+wallet.currency+'\nمبلغ واریز را به تومان وارد کنید:');
+ if(!raw)return;
+ const amount=Number(raw.replace(/,/g,''));
+ if(!Number.isInteger(amount)||amount<=0){alert('مبلغ معتبر نیست');return}
+ const key='web-wallet-'+crypto.randomUUID();
+ const result=await api('/admin/customers/'+id+'/wallet/credit',{method:'POST',body:JSON.stringify({amount,currency:wallet.currency,idempotency_key:key,reference:'web-admin'})});
+ alert('موجودی جدید: '+Number(result.balance).toLocaleString()+' '+result.currency);
+}
 async function togglePlan(id,active){await api('/admin/plans/'+id,{method:'PATCH',body:JSON.stringify({is_active:active})});show('plans')}
 async function createPlan(){
  const body={name:$('#pname').value,quota_bytes:Number($('#pquota').value),price_amount:Number($('#pprice').value),currency:'IRT',validity_days:$('#pdays').value?Number($('#pdays').value):null};
