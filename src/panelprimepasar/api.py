@@ -9,6 +9,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import Update
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import ValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from panelprimepasar.admin_panel import router as admin_router
 from panelprimepasar.admin_ui import router as admin_ui_router
@@ -105,6 +107,19 @@ app.include_router(payment_callback_router)
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/ready", tags=["system"])
+async def readiness() -> dict[str, str]:
+    try:
+        async with SessionFactory() as session:
+            await session.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database is not ready",
+        ) from exc
+    return {"status": "ready"}
 
 
 @app.post("/telegram/webhook", include_in_schema=False)
