@@ -101,6 +101,10 @@ class Payment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "payments"
 
     order_id: Mapped[UUID] = mapped_column(ForeignKey("orders.id"), index=True)
+    payment_method_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("payment_method_configs.id"),
+        index=True,
+    )
     provider: Mapped[str] = mapped_column(String(32))
     provider_transaction_id: Mapped[str | None] = mapped_column(String(191), unique=True)
     amount: Mapped[int] = mapped_column(BigInteger)
