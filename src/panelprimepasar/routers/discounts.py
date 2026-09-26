@@ -19,6 +19,7 @@ from panelprimepasar.services.discounts import (
     reserve_discount_for_order,
 )
 from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.payments import PaymentStateError, settle_zero_price_order
 from panelprimepasar.services.provisioning import ProvisioningStateError
 from panelprimepasar.services.subscriptions import SubscriptionStateError
@@ -256,5 +257,5 @@ async def discount_code_received(
 
     await message.answer(
         "روش پرداخت را انتخاب کنید یا رسید پرداخت را ارسال کنید.",
-        reply_markup=payment_receipt_keyboard(order.id),
+        reply_markup=payment_receipt_keyboard(order.id, payment_methods),
     )
