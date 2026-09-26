@@ -27,6 +27,7 @@ async def create_pending_payment(
     order_id: UUID,
     provider: str,
     raw_reference: str | None = None,
+    payment_method_id: UUID | None = None,
 ) -> Payment:
     order = await session.scalar(
         select(Order).where(Order.id == order_id).with_for_update()
@@ -42,14 +43,20 @@ async def create_pending_payment(
             f"Order status {order.status.value!r} cannot start a payment"
         )
 
-    existing = await session.scalar(
-        select(Payment)
-        .where(
-            Payment.order_id == order.id,
-            Payment.provider == provider,
-            Payment.status == PaymentStatus.PENDING,
+    existing_query = select(Payment).where(
+        Payment.order_id == order.id,
+        Payment.provider == provider,
+        Payment.status == PaymentStatus.PENDING,
+    )
+    if payment_method_id is None:
+        existing_query = existing_query.where(Payment.payment_method_id.is_(None))
+    else:
+        existing_query = existing_query.where(
+            Payment.payment_method_id == payment_method_id
         )
-        .order_by(Payment.created_at.desc())
+
+    existing = await session.scalar(
+        existing_query.order_by(Payment.created_at.desc())
     )
     if existing is not None:
         if raw_reference is not None:
@@ -59,6 +66,7 @@ async def create_pending_payment(
 
     payment = Payment(
         order_id=order.id,
+        payment_method_id=payment_method_id,
         provider=provider,
         amount=order.price_amount,
         currency=order.currency,
