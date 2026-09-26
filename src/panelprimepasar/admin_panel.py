@@ -1,7 +1,7 @@
 import secrets
 from dataclasses import dataclass
-from html import escape
 from datetime import UTC, datetime
+from html import escape
 from typing import Annotated
 from uuid import UUID
 
