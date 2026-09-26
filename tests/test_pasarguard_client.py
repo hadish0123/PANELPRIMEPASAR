@@ -158,3 +158,105 @@ async def test_permission_error_is_typed() -> None:
         )
         with pytest.raises(PasarGuardPermissionError, match="Permission denied"):
             await client.list_roles_simple()
+
+
+
+@pytest.mark.asyncio
+async def test_find_admin_by_username_uses_singular_username_filter() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/admins"
+        assert request.url.params["username"] == "target_admin"
+        assert "usernames" not in request.url.params
+        return httpx.Response(
+            200,
+            json={
+                "admins": [
+                    {
+                        "id": 77,
+                        "username": "target_admin",
+                        "data_limit": 1000,
+                        "status": "active",
+                    }
+                ],
+                "total": 1,
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://panel.example",
+    ) as http_client:
+        client = PasarGuardClient(
+            base_url="https://panel.example",
+            api_key="pg_key_test",
+            client=http_client,
+        )
+        admin = await client.find_admin_by_username("target_admin")
+
+    assert admin is not None
+    assert admin.id == 77
+
+
+@pytest.mark.asyncio
+async def test_ensure_admin_refetches_created_admin_by_username() -> None:
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(f"{request.method} {request.url.path}")
+        if request.method == "GET" and request.url.path == "/api/admins":
+            username = request.url.params.get("username")
+            if requests.count("GET /api/admins") == 1:
+                return httpx.Response(200, json={"admins": [], "total": 0})
+            assert username == "new_reseller"
+            return httpx.Response(
+                200,
+                json={
+                    "admins": [
+                        {
+                            "id": 222,
+                            "username": "new_reseller",
+                            "data_limit": 5000,
+                            "status": "active",
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+
+        if request.method == "POST" and request.url.path == "/api/admin":
+            return httpx.Response(
+                201,
+                json={
+                    "id": 124,
+                    "username": "new_reseller",
+                    "data_limit": 5000,
+                    "status": "active",
+                },
+            )
+
+        return httpx.Response(500)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="https://panel.example",
+    ) as http_client:
+        client = PasarGuardClient(
+            base_url="https://panel.example",
+            api_key="pg_key_test",
+            client=http_client,
+        )
+        admin = await client.ensure_admin(
+            username="new_reseller",
+            password="strong-password",
+            role_id=7,
+            data_limit=5000,
+        )
+
+    assert admin.id == 222
+    assert requests == [
+        "GET /api/admins",
+        "POST /api/admin",
+        "GET /api/admins",
+    ]
