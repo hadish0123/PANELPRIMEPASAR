@@ -20,6 +20,7 @@ from panelprimepasar.keyboards.customer import (
 )
 from panelprimepasar.models import Customer, Order, OrderStatus
 from panelprimepasar.services.audit import record_audit_event
+from panelprimepasar.services.payment_methods import list_enabled_payment_methods
 from panelprimepasar.services.orders import (
     checkout_idempotency_key,
     get_active_plan,
@@ -232,13 +233,14 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
             "قبل از پرداخت با مدیریت هماهنگ کنید."
         )
 
+    payment_methods = await list_enabled_payment_methods(session)
     await callback.message.answer(
         f"شماره سفارش: <code>{order.id}</code>\n"
         f"مبلغ: <b>{format_money(order.price_amount, order.currency)}</b>\n"
         "وضعیت: <b>در انتظار پرداخت</b>\n\n"
         f"{payment_text}\n\n"
         "پس از پرداخت، تصویر یا فایل رسید را ارسال کنید.",
-        reply_markup=payment_receipt_keyboard(order.id),
+        reply_markup=payment_receipt_keyboard(order.id, payment_methods),
     )
 
 
