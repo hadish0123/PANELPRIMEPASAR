@@ -23,6 +23,7 @@ def main_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="👤 حساب من"),
             ],
             [
+                KeyboardButton(text="💰 کیف پول"),
                 KeyboardButton(text="🎧 پشتیبانی"),
             ],
         ],
@@ -54,6 +55,10 @@ def plan_actions_keyboard(plan_id: UUID) -> InlineKeyboardMarkup:
 
 def payment_receipt_keyboard(order_id: UUID) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💰 پرداخت از کیف پول",
+        callback_data=f"wallet_pay:{order_id}",
+    )
     builder.button(
         text="📎 ارسال رسید پرداخت",
         callback_data=f"receipt:{order_id}",
