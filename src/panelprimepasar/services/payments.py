@@ -160,7 +160,8 @@ async def approve_manual_order(
     session: AsyncSession,
     *,
     order_id: UUID,
-    actor_telegram_id: int,
+    actor_telegram_id: int | None = None,
+    actor_reference: str | None = None,
 ) -> Payment:
     order = await session.scalar(
         select(Order).where(Order.id == order_id).with_for_update()
@@ -196,6 +197,11 @@ async def approve_manual_order(
             f"Order status {order.status.value!r} cannot be manually approved"
         )
 
+    if actor_reference is None:
+        if actor_telegram_id is None:
+            raise PaymentStateError("Manual approval actor is required")
+        actor_reference = f"telegram:{actor_telegram_id}"
+
     payment = await session.scalar(
         select(Payment)
         .where(
@@ -211,10 +217,10 @@ async def approve_manual_order(
             session,
             order_id=order.id,
             provider="manual",
-            raw_reference=f"approved-by-telegram:{actor_telegram_id}",
+            raw_reference=f"approved-by:{actor_reference}",
         )
     else:
-        payment.raw_reference = f"approved-by-telegram:{actor_telegram_id}"
+        payment.raw_reference = f"approved-by:{actor_reference}"
         await session.flush()
 
     return await verify_payment(
