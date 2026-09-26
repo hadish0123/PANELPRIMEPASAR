@@ -11,6 +11,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import ValidationError
 
 from panelprimepasar.admin_panel import router as admin_router
+from panelprimepasar.admin_ui import router as admin_ui_router
 from panelprimepasar.bot import build_bot, build_dispatcher
 from panelprimepasar.config import Settings, get_settings
 from panelprimepasar.db import SessionFactory, engine
@@ -96,6 +97,7 @@ app = FastAPI(
 )
 
 app.include_router(admin_router)
+app.include_router(admin_ui_router)
 
 
 @app.get("/health", tags=["system"])
