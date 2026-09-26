@@ -36,7 +36,9 @@ async def get_or_create_wallet(
     )
     if wallet is not None:
         if wallet.currency.upper() != normalized_currency:
-            raise WalletStateError("Wallet currency does not match requested currency")
+            raise WalletStateError(
+                "Wallet currency does not match requested currency"
+            ) from None
         return wallet
 
     wallet = Wallet(
