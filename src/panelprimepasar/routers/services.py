@@ -31,6 +31,7 @@ from panelprimepasar.services.subscriptions import (
     get_customer_subscription,
     list_customer_subscriptions,
 )
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="customer_services")
 
@@ -122,7 +123,7 @@ async def service_list_callback(
     callback: CallbackQuery,
     session: AsyncSession,
 ) -> None:
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
     await _send_subscription_list(callback.message, session)
@@ -134,18 +135,18 @@ async def service_details(
     session: AsyncSession,
 ) -> None:
     if not isinstance(callback.message, Message):
-        await callback.answer()
+        await answer_callback(callback)
         return
 
     try:
         subscription_id = UUID(hex=(callback.data or "").removeprefix("svc:"))
     except ValueError:
-        await callback.answer("شناسه سرویس معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سرویس معتبر نیست.", show_alert=True)
         return
 
     customer = await _customer_for_user(session, callback.from_user.id)
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     subscription = await get_customer_subscription(
@@ -154,7 +155,7 @@ async def service_details(
         subscription_id=subscription_id,
     )
     if subscription is None:
-        await callback.answer("سرویس پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سرویس پیدا نشد.", show_alert=True)
         return
 
     plan = await session.scalar(select(Plan).where(Plan.id == subscription.plan_id))
@@ -166,7 +167,7 @@ async def service_details(
         SubscriptionStatus.CANCELED.value: "لغوشده",
     }.get(subscription.status, subscription.status)
 
-    await callback.answer()
+    await answer_callback(callback)
     await callback.message.answer(
         f"<b>{plan_name}</b>\n"
         f"شناسه سرویس: <code>{subscription.id}</code>\n"
@@ -186,7 +187,7 @@ async def _start_lifecycle(
 ) -> None:
     customer = await _customer_for_user(session, callback.from_user.id)
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     subscription = await get_customer_subscription(
@@ -195,12 +196,12 @@ async def _start_lifecycle(
         subscription_id=subscription_id,
     )
     if subscription is None:
-        await callback.answer("سرویس پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سرویس پیدا نشد.", show_alert=True)
         return
 
     plans = await list_active_plans(session)
     if not plans:
-        await callback.answer("پلن فعالی برای فروش وجود ندارد.", show_alert=True)
+        await answer_callback(callback, "پلن فعالی برای فروش وجود ندارد.", show_alert=True)
         return
 
     await state.clear()
@@ -209,7 +210,7 @@ async def _start_lifecycle(
         order_kind=kind.value,
     )
     await state.set_state(LifecycleForm.choosing_plan)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         title = "پلن تمدید" if kind == OrderKind.RENEWAL else "بسته افزایش حجم"
         await callback.message.answer(
@@ -225,11 +226,9 @@ async def renew_service_callback(
     session: AsyncSession,
 ) -> None:
     try:
-        subscription_id = UUID(
-            hex=(callback.data or "").removeprefix("svc_renew:")
-        )
+        subscription_id = UUID(hex=(callback.data or "").removeprefix("svc_renew:"))
     except ValueError:
-        await callback.answer("شناسه سرویس معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سرویس معتبر نیست.", show_alert=True)
         return
     await _start_lifecycle(
         callback,
@@ -247,11 +246,9 @@ async def topup_service_callback(
     session: AsyncSession,
 ) -> None:
     try:
-        subscription_id = UUID(
-            hex=(callback.data or "").removeprefix("svc_topup:")
-        )
+        subscription_id = UUID(hex=(callback.data or "").removeprefix("svc_topup:"))
     except ValueError:
-        await callback.answer("شناسه سرویس معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سرویس معتبر نیست.", show_alert=True)
         return
     await _start_lifecycle(
         callback,
@@ -270,7 +267,7 @@ async def service_action_picker(
 ) -> None:
     data = (callback.data or "").split(":")
     if len(data) != 3:
-        await callback.answer("درخواست معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "درخواست معتبر نیست.", show_alert=True)
         return
 
     _, raw_kind, raw_id = data
@@ -278,11 +275,11 @@ async def service_action_picker(
         kind = OrderKind(raw_kind)
         subscription_id = UUID(hex=raw_id)
     except (ValueError, TypeError):
-        await callback.answer("درخواست معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "درخواست معتبر نیست.", show_alert=True)
         return
 
     if kind not in {OrderKind.RENEWAL, OrderKind.TOPUP}:
-        await callback.answer("نوع عملیات معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "نوع عملیات معتبر نیست.", show_alert=True)
         return
 
     await _start_lifecycle(
@@ -304,13 +301,13 @@ async def lifecycle_plan_selected(
     session: AsyncSession,
 ) -> None:
     if not isinstance(callback.message, Message):
-        await callback.answer()
+        await answer_callback(callback)
         return
 
     try:
         plan_id = UUID(hex=(callback.data or "").removeprefix("lifeplan:"))
     except ValueError:
-        await callback.answer("شناسه پلن معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه پلن معتبر نیست.", show_alert=True)
         return
 
     data = await state.get_data()
@@ -319,13 +316,13 @@ async def lifecycle_plan_selected(
         kind = OrderKind(str(data["order_kind"]))
     except (KeyError, ValueError):
         await state.clear()
-        await callback.answer("فرآیند منقضی شده است.", show_alert=True)
+        await answer_callback(callback, "فرآیند منقضی شده است.", show_alert=True)
         return
 
     customer = await _customer_for_user(session, callback.from_user.id)
     if customer is None:
         await state.clear()
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     subscription = await get_customer_subscription(
@@ -341,7 +338,7 @@ async def lifecycle_plan_selected(
     )
     if subscription is None or plan is None:
         await state.clear()
-        await callback.answer("سرویس یا پلن دیگر در دسترس نیست.", show_alert=True)
+        await answer_callback(callback, "سرویس یا پلن دیگر در دسترس نیست.", show_alert=True)
         return
 
     idempotency_key = (
@@ -360,15 +357,11 @@ async def lifecycle_plan_selected(
 
     instructions = get_settings().manual_payment_instructions
     payment_text = (
-        escape(instructions)
-        if instructions
-        else "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است."
+        escape(instructions) if instructions else "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است."
     )
     action_text = "تمدید" if kind == OrderKind.RENEWAL else "افزایش حجم"
 
-    await callback.answer(
-        "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است."
-    )
+    await answer_callback(callback, "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است.")
     payment_methods = await list_enabled_payment_methods(session)
     await callback.message.answer(
         f"سفارش {action_text} ثبت شد.\n"
@@ -383,7 +376,7 @@ async def lifecycle_plan_selected(
 @router.callback_query(F.data == "life_cancel")
 async def lifecycle_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await callback.answer("عملیات لغو شد.")
+    await answer_callback(callback, "عملیات لغو شد.")
 
 
 @router.message(F.text == "👤 حساب من")
@@ -397,9 +390,7 @@ async def profile(message: Message, session: AsyncSession) -> None:
         return
 
     order_count = int(
-        await session.scalar(
-            select(func.count(Order.id)).where(Order.customer_id == customer.id)
-        )
+        await session.scalar(select(func.count(Order.id)).where(Order.customer_id == customer.id))
         or 0
     )
     active_count = int(
@@ -413,9 +404,7 @@ async def profile(message: Message, session: AsyncSession) -> None:
     )
 
     username = (
-        f"@{escape(customer.telegram_username)}"
-        if customer.telegram_username
-        else "ثبت نشده"
+        f"@{escape(customer.telegram_username)}" if customer.telegram_username else "ثبت نشده"
     )
     await message.answer(
         "<b>حساب کاربری</b>\n\n"

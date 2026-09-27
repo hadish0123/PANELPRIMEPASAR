@@ -15,6 +15,7 @@ from panelprimepasar.services.fulfillment import fulfill_paid_order
 from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.provisioning import ProvisioningStateError
 from panelprimepasar.services.subscriptions import SubscriptionStateError
+from panelprimepasar.services.telegram_callbacks import answer_callback
 from panelprimepasar.services.wallets import (
     WalletStateError,
     get_or_create_wallet,
@@ -94,7 +95,7 @@ async def wallet_pay(
     try:
         order_id = UUID((callback.data or "").removeprefix("wallet_pay:"))
     except ValueError:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     customer = await _customer(
@@ -102,7 +103,7 @@ async def wallet_pay(
         telegram_user_id=callback.from_user.id,
     )
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     try:
@@ -128,10 +129,10 @@ async def wallet_pay(
         await session.commit()
     except WalletStateError as exc:
         await session.rollback()
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
-    await callback.answer("پرداخت از کیف پول انجام شد.")
+    await answer_callback(callback, "پرداخت از کیف پول انجام شد.")
 
     try:
         outcome = await fulfill_paid_order(

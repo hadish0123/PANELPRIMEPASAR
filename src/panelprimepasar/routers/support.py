@@ -25,6 +25,7 @@ from panelprimepasar.services.support import (
     get_ticket_messages,
     list_customer_tickets,
 )
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="customer_support")
 
@@ -60,8 +61,7 @@ async def _show_home(
         limit=10,
     )
     await message.answer(
-        "<b>پشتیبانی</b>\n"
-        "تیکت جدید بسازید یا یکی از تیکت‌های قبلی را باز کنید.",
+        "<b>پشتیبانی</b>\nتیکت جدید بسازید یا یکی از تیکت‌های قبلی را باز کنید.",
         reply_markup=support_home_keyboard(tickets),
     )
 
@@ -98,11 +98,11 @@ async def support_home_callback(
         telegram_user_id=callback.from_user.id,
     )
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     await state.clear()
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await _show_home(callback.message, session=session, customer=customer)
 
@@ -114,7 +114,7 @@ async def support_new(
 ) -> None:
     await state.clear()
     await state.set_state(NewTicketForm.subject)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("موضوع تیکت را ارسال کنید.")
 
@@ -201,11 +201,9 @@ async def support_ticket_detail(
     session: AsyncSession,
 ) -> None:
     try:
-        ticket_id = UUID(
-            hex=(callback.data or "").removeprefix("support:ticket:")
-        )
+        ticket_id = UUID(hex=(callback.data or "").removeprefix("support:ticket:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     customer = await _customer(
@@ -213,7 +211,7 @@ async def support_ticket_detail(
         telegram_user_id=callback.from_user.id,
     )
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     ticket = await session.scalar(
@@ -223,7 +221,7 @@ async def support_ticket_detail(
         )
     )
     if ticket is None:
-        await callback.answer("تیکت پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "تیکت پیدا نشد.", show_alert=True)
         return
 
     messages = await get_ticket_messages(
@@ -236,7 +234,7 @@ async def support_ticket_detail(
         sender = "👤 شما" if item.sender_type == "customer" else "🛠 پشتیبانی"
         transcript.append(f"<b>{sender}</b>\n{escape(item.body)}")
 
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             f"<b>{escape(ticket.subject)}</b>\n"
@@ -257,11 +255,9 @@ async def support_reply_start(
     session: AsyncSession,
 ) -> None:
     try:
-        ticket_id = UUID(
-            hex=(callback.data or "").removeprefix("support:reply:")
-        )
+        ticket_id = UUID(hex=(callback.data or "").removeprefix("support:reply:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     customer = await _customer(
@@ -269,7 +265,7 @@ async def support_reply_start(
         telegram_user_id=callback.from_user.id,
     )
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     ticket = await session.scalar(
@@ -279,13 +275,13 @@ async def support_reply_start(
         )
     )
     if ticket is None or ticket.status == TicketStatus.CLOSED.value:
-        await callback.answer("این تیکت قابل پاسخ نیست.", show_alert=True)
+        await answer_callback(callback, "این تیکت قابل پاسخ نیست.", show_alert=True)
         return
 
     await state.clear()
     await state.update_data(ticket_id=str(ticket.id))
     await state.set_state(ReplyTicketForm.body)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("پیام جدید را ارسال کنید.")
 
@@ -358,11 +354,9 @@ async def support_close(
     session: AsyncSession,
 ) -> None:
     try:
-        ticket_id = UUID(
-            hex=(callback.data or "").removeprefix("support:close:")
-        )
+        ticket_id = UUID(hex=(callback.data or "").removeprefix("support:close:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     customer = await _customer(
@@ -370,7 +364,7 @@ async def support_close(
         telegram_user_id=callback.from_user.id,
     )
     if customer is None:
-        await callback.answer("حساب کاربری پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
         return
 
     try:
@@ -380,7 +374,7 @@ async def support_close(
             ticket_id=ticket_id,
         )
     except SupportStateError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
     await record_audit_event(
@@ -393,7 +387,7 @@ async def support_close(
         correlation_id=str(ticket.id),
     )
     await session.commit()
-    await callback.answer("تیکت بسته شد.")
+    await answer_callback(callback, "تیکت بسته شد.")
     if isinstance(callback.message, Message):
         await callback.message.answer(
             "تیکت بسته شد.",

@@ -27,6 +27,7 @@ from panelprimepasar.services.payment_methods import (
     start_external_payment,
 )
 from panelprimepasar.services.payments import PaymentStateError
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="customer_payments")
 
@@ -75,10 +76,7 @@ def _parse_method_callback(
 
 def _format_card_number(value: str) -> str:
     compact = value.replace(" ", "").replace("-", "")
-    return " ".join(
-        compact[index : index + 4]
-        for index in range(0, len(compact), 4)
-    )
+    return " ".join(compact[index : index + 4] for index in range(0, len(compact), 4))
 
 
 @router.callback_query(F.data.startswith("pmcard:"))
@@ -88,7 +86,7 @@ async def manual_card_payment(
 ) -> None:
     parsed = _parse_method_callback(callback.data, prefix="pmcard")
     if parsed is None:
-        await callback.answer("اطلاعات روش پرداخت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "اطلاعات روش پرداخت معتبر نیست.", show_alert=True)
         return
     slug, order_id = parsed
 
@@ -98,11 +96,11 @@ async def manual_card_payment(
         order_id=order_id,
     )
     if owned is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     _, order = owned
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
-        await callback.answer("این سفارش دیگر در مرحله پرداخت نیست.", show_alert=True)
+        await answer_callback(callback, "این سفارش دیگر در مرحله پرداخت نیست.", show_alert=True)
         return
 
     try:
@@ -115,7 +113,7 @@ async def manual_card_payment(
             raise PaymentMethodStateError("روش کارت‌به‌کارت فعال نیست")
         config = parse_public_config(method)
     except PaymentMethodStateError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
     card_number = config.get("card_number", "")
@@ -144,7 +142,7 @@ async def manual_card_payment(
         ]
     )
 
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             "\n".join(lines),
@@ -168,7 +166,7 @@ async def online_gateway_payment(
 ) -> None:
     parsed = _parse_method_callback(callback.data, prefix="pm")
     if parsed is None:
-        await callback.answer("اطلاعات درگاه معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "اطلاعات درگاه معتبر نیست.", show_alert=True)
         return
     slug, order_id = parsed
 
@@ -178,11 +176,11 @@ async def online_gateway_payment(
         order_id=order_id,
     )
     if owned is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     customer, order = owned
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
-        await callback.answer("این سفارش دیگر در مرحله پرداخت نیست.", show_alert=True)
+        await answer_callback(callback, "این سفارش دیگر در مرحله پرداخت نیست.", show_alert=True)
         return
 
     method = await get_payment_method_by_slug(
@@ -191,7 +189,7 @@ async def online_gateway_payment(
         enabled_only=True,
     )
     if method is None or method.kind == PaymentMethodKind.MANUAL_CARD.value:
-        await callback.answer("درگاه فعال نیست.", show_alert=True)
+        await answer_callback(callback, "درگاه فعال نیست.", show_alert=True)
         return
 
     try:
@@ -218,7 +216,7 @@ async def online_gateway_payment(
         await session.commit()
     except (PaymentMethodStateError, PaymentProviderError, PaymentStateError) as exc:
         await session.rollback()
-        await callback.answer("اتصال به درگاه انجام نشد.", show_alert=True)
+        await answer_callback(callback, "اتصال به درگاه انجام نشد.", show_alert=True)
         if isinstance(callback.message, Message):
             await callback.message.answer(
                 "در ایجاد پرداخت بانکی خطایی رخ داد. "
@@ -227,7 +225,7 @@ async def online_gateway_payment(
             )
         return
 
-    await callback.answer()
+    await answer_callback(callback)
     if not intent.payment_url:
         if isinstance(callback.message, Message):
             await callback.message.answer("لینک پرداخت از درگاه دریافت نشد.")

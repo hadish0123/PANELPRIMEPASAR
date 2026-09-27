@@ -24,6 +24,7 @@ from panelprimepasar.services.payment_methods import list_enabled_payment_method
 from panelprimepasar.services.payments import PaymentStateError, settle_zero_price_order
 from panelprimepasar.services.provisioning import ProvisioningStateError
 from panelprimepasar.services.subscriptions import SubscriptionStateError
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="customer_discounts")
 
@@ -97,8 +98,7 @@ async def _deliver_free_order(
 
     if not outcome.success:
         await message.answer(
-            "کد تخفیف ثبت شد اما اجرای سرویس کامل نشد. "
-            "مدیریت می‌تواند عملیات را دوباره اجرا کند."
+            "کد تخفیف ثبت شد اما اجرای سرویس کامل نشد. مدیریت می‌تواند عملیات را دوباره اجرا کند."
         )
         return
 
@@ -129,8 +129,7 @@ async def _deliver_free_order(
         )
     except TelegramAPIError:
         await message.answer(
-            "پنل ساخته شد اما ارسال مشخصات ناموفق بود؛ "
-            "از پشتیبانی درخواست صدور مجدد رمز کنید."
+            "پنل ساخته شد اما ارسال مشخصات ناموفق بود؛ از پشتیبانی درخواست صدور مجدد رمز کنید."
         )
 
 
@@ -143,7 +142,7 @@ async def discount_start(
     try:
         order_id = UUID((callback.data or "").removeprefix("discount:"))
     except ValueError:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     result = await _customer_order(
@@ -152,20 +151,22 @@ async def discount_start(
         order_id=order_id,
     )
     if result is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     _, order = result
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
-        await callback.answer("این سفارش دیگر قابل تخفیف نیست.", show_alert=True)
+        await answer_callback(callback, "این سفارش دیگر قابل تخفیف نیست.", show_alert=True)
         return
     if order.discount_code_id is not None:
-        await callback.answer("برای این سفارش قبلاً کد تخفیف ثبت شده است.", show_alert=True)
+        await answer_callback(
+            callback, "برای این سفارش قبلاً کد تخفیف ثبت شده است.", show_alert=True
+        )
         return
 
     await state.clear()
     await state.update_data(order_id=str(order.id))
     await state.set_state(DiscountForm.waiting_code)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("کد تخفیف را ارسال کنید.")
 

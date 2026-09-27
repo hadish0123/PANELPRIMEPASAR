@@ -45,6 +45,7 @@ from panelprimepasar.services.provisioning import (
     ProvisioningStateError,
 )
 from panelprimepasar.services.subscriptions import SubscriptionStateError
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="admin")
 
@@ -73,22 +74,7 @@ async def _reject_message(message: Message) -> None:
 
 
 async def _reject_callback(callback: CallbackQuery) -> None:
-    try:
-        await callback.answer("دسترسی ندارید.", show_alert=True)
-    except TelegramAPIError:
-        pass
-
-
-async def _ack_callback(
-    callback: CallbackQuery,
-    text: str | None = None,
-) -> None:
-    try:
-        await callback.answer(text)
-    except TelegramAPIError:
-        # Telegram retries webhook updates after a previous handler error.
-        # An expired callback acknowledgement must not abort idempotent processing.
-        pass
+    await answer_callback(callback, "دسترسی ندارید.", show_alert=True)
 
 
 def _parse_callback_uuid(data: str | None, prefix: str) -> UUID | None:
@@ -108,9 +94,7 @@ async def _get_order_customer(
     if order is None:
         return None
 
-    customer = await session.scalar(
-        select(Customer).where(Customer.id == order.customer_id)
-    )
+    customer = await session.scalar(select(Customer).where(Customer.id == order.customer_id))
     if customer is None:
         return None
     return order, customer
@@ -118,9 +102,7 @@ async def _get_order_customer(
 
 def _order_details_text(order: Order, customer: Customer) -> str:
     username = (
-        f"@{escape(customer.telegram_username)}"
-        if customer.telegram_username
-        else "بدون username"
+        f"@{escape(customer.telegram_username)}" if customer.telegram_username else "بدون username"
     )
     return (
         f"<b>سفارش {str(order.id)[:8]}</b>\n\n"
@@ -192,8 +174,7 @@ async def _run_provisioning(
         )
     except PasarGuardConfigurationError as exc:
         await callback.message.answer(
-            "اتصال PasarGuard هنوز تنظیم نشده است.\n"
-            f"<code>{escape(str(exc))}</code>"
+            f"اتصال PasarGuard هنوز تنظیم نشده است.\n<code>{escape(str(exc))}</code>"
         )
         return
 
@@ -217,10 +198,7 @@ async def _run_provisioning(
             )
     except (ProvisioningStateError, PasarGuardError) as exc:
         await session.rollback()
-        await callback.message.answer(
-            "عملیات ساخت پنل اجرا نشد.\n"
-            f"<code>{escape(str(exc))}</code>"
-        )
+        await callback.message.answer(f"عملیات ساخت پنل اجرا نشد.\n<code>{escape(str(exc))}</code>")
         return
     finally:
         await target.client.close()
@@ -269,11 +247,7 @@ async def _run_provisioning(
         session,
         actor_type="system",
         actor_id=None,
-        action=(
-            "credentials.delivery_succeeded"
-            if delivered
-            else "credentials.delivery_failed"
-        ),
+        action=("credentials.delivery_succeeded" if delivered else "credentials.delivery_failed"),
         entity_type="order",
         entity_id=str(order_id),
         correlation_id=str(order_id),
@@ -282,9 +256,7 @@ async def _run_provisioning(
     await session.commit()
 
     if delivered:
-        await callback.message.answer(
-            "پنل ساخته شد و مشخصات برای مشتری در Telegram ارسال شد."
-        )
+        await callback.message.answer("پنل ساخته شد و مشخصات برای مشتری در Telegram ارسال شد.")
     else:
         await callback.message.answer(
             "پنل ساخته شد، اما ارسال مشخصات به Telegram مشتری ناموفق بود. "
@@ -351,10 +323,7 @@ async def _run_order_fulfillment(
         await session.commit()
     except (SubscriptionStateError, ProvisioningStateError, PasarGuardError) as exc:
         await session.rollback()
-        await callback.message.answer(
-            "عملیات سرویس اجرا نشد.\n"
-            f"<code>{escape(str(exc))}</code>"
-        )
+        await callback.message.answer(f"عملیات سرویس اجرا نشد.\n<code>{escape(str(exc))}</code>")
         return
 
     if not outcome.success:
@@ -373,9 +342,7 @@ async def _run_order_fulfillment(
     except TelegramAPIError:
         pass
 
-    await callback.message.answer(
-        f"{action_text} سرویس با موفقیت اعمال شد."
-    )
+    await callback.message.answer(f"{action_text} سرویس با موفقیت اعمال شد.")
 
 
 @router.message(Command("admin"))
@@ -412,11 +379,9 @@ async def admin_home(
         return
 
     await state.clear()
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("مدیریت فروش پنل", reply_markup=admin_menu())
-
-
 
 
 @router.callback_query(F.data == "admin:pasarguard_check")
@@ -432,7 +397,7 @@ async def pasarguard_check(
         await _reject_callback(callback)
         return
 
-    await callback.answer("در حال بررسی اتصال...")
+    await answer_callback(callback, "در حال بررسی اتصال...")
     if not isinstance(callback.message, Message):
         return
 
@@ -441,8 +406,7 @@ async def pasarguard_check(
         client = build_pasarguard_client(settings)
     except PasarGuardConfigurationError as exc:
         await callback.message.answer(
-            "اتصال PasarGuard تنظیم نشده است.\n"
-            f"<code>{escape(str(exc))}</code>",
+            f"اتصال PasarGuard تنظیم نشده است.\n<code>{escape(str(exc))}</code>",
             reply_markup=admin_menu(),
         )
         return
@@ -472,9 +436,7 @@ async def pasarguard_check(
             for role in roles
         ]
         current_role = (
-            escape(current_admin.role.name)
-            if current_admin.role is not None
-            else "نامشخص"
+            escape(current_admin.role.name) if current_admin.role is not None else "نامشخص"
         )
         text = (
             "<b>PasarGuard diagnostics</b>\n\n"
@@ -488,8 +450,7 @@ async def pasarguard_check(
         await callback.message.answer(text, reply_markup=admin_menu())
     except PasarGuardError as exc:
         await callback.message.answer(
-            "بررسی PasarGuard ناموفق بود.\n"
-            f"<code>{escape(str(exc))}</code>",
+            f"بررسی PasarGuard ناموفق بود.\n<code>{escape(str(exc))}</code>",
             reply_markup=admin_menu(),
         )
     finally:
@@ -510,7 +471,7 @@ async def create_plan_start(
         await _reject_callback(callback)
         return
 
-    await callback.answer()
+    await answer_callback(callback)
     await state.clear()
     await state.set_state(PlanForm.name)
     if isinstance(callback.message, Message):
@@ -648,7 +609,7 @@ async def admin_plans(callback: CallbackQuery, session: AsyncSession) -> None:
         await _reject_callback(callback)
         return
 
-    await callback.answer()
+    await answer_callback(callback)
     plans = list(
         (
             await session.scalars(
@@ -684,12 +645,12 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
 
     plan_id = _parse_callback_uuid(callback.data, "admin:toggle_plan:")
     if plan_id is None:
-        await callback.answer("شناسه پلن معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه پلن معتبر نیست.", show_alert=True)
         return
 
     plan = await session.scalar(select(Plan).where(Plan.id == plan_id))
     if plan is None:
-        await callback.answer("پلن پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "پلن پیدا نشد.", show_alert=True)
         return
 
     plan.is_active = not plan.is_active
@@ -704,7 +665,7 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
         correlation_id=str(plan.id),
         metadata={"is_active": plan.is_active},
     )
-    await callback.answer("وضعیت پلن تغییر کرد.")
+    await answer_callback(callback, "وضعیت پلن تغییر کرد.")
 
     plans = list(
         (
@@ -714,9 +675,7 @@ async def toggle_plan(callback: CallbackQuery, session: AsyncSession) -> None:
         ).all()
     )
     if isinstance(callback.message, Message):
-        await callback.message.edit_reply_markup(
-            reply_markup=admin_plans_keyboard(plans)
-        )
+        await callback.message.edit_reply_markup(reply_markup=admin_plans_keyboard(plans))
 
 
 @router.callback_query(F.data == "admin:orders")
@@ -729,13 +688,9 @@ async def admin_orders(callback: CallbackQuery, session: AsyncSession) -> None:
         await _reject_callback(callback)
         return
 
-    await callback.answer()
+    await answer_callback(callback)
     orders = list(
-        (
-            await session.scalars(
-                select(Order).order_by(Order.created_at.desc()).limit(20)
-            )
-        ).all()
+        (await session.scalars(select(Order).order_by(Order.created_at.desc()).limit(20))).all()
     )
     if not isinstance(callback.message, Message):
         return
@@ -768,16 +723,16 @@ async def admin_order_details(
 
     order_id = _parse_callback_uuid(callback.data, "admin:order:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     order_customer = await _get_order_customer(session, order_id)
     if order_customer is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
 
     order, customer = order_customer
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             _order_details_text(order, customer),
@@ -801,10 +756,10 @@ async def approve_order(
 
     order_id = _parse_callback_uuid(callback.data, "admin:approve:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
-    await _ack_callback(callback, "در حال تأیید و ساخت پنل...")
+    await answer_callback(callback, "در حال تأیید و ساخت پنل...")
     try:
         payment = await approve_manual_order(
             session,
@@ -830,9 +785,7 @@ async def approve_order(
     except PaymentStateError as exc:
         await session.rollback()
         if isinstance(callback.message, Message):
-            await callback.message.answer(
-                f"پرداخت تأیید نشد: <code>{escape(str(exc))}</code>"
-            )
+            await callback.message.answer(f"پرداخت تأیید نشد: <code>{escape(str(exc))}</code>")
         return
 
     await _run_order_fulfillment(
@@ -859,12 +812,12 @@ async def reject_payment(
 
     order_id = _parse_callback_uuid(callback.data, "admin:reject_payment:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     order_customer = await _get_order_customer(session, order_id)
     if order_customer is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     order, customer = order_customer
 
@@ -889,10 +842,10 @@ async def reject_payment(
         await session.commit()
     except PaymentStateError as exc:
         await session.rollback()
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
-    await callback.answer("رسید رد شد.")
+    await answer_callback(callback, "رسید رد شد.")
     try:
         await bot.send_message(
             customer.telegram_user_id,
@@ -925,12 +878,12 @@ async def cancel_order(
 
     order_id = _parse_callback_uuid(callback.data, "admin:cancel_order:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     order_customer = await _get_order_customer(session, order_id)
     if order_customer is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     _, customer = order_customer
 
@@ -952,10 +905,10 @@ async def cancel_order(
         await session.commit()
     except PaymentStateError as exc:
         await session.rollback()
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
-    await callback.answer("سفارش لغو شد.")
+    await answer_callback(callback, "سفارش لغو شد.")
     try:
         await bot.send_message(
             customer.telegram_user_id,
@@ -987,10 +940,10 @@ async def provision_order(
 
     order_id = _parse_callback_uuid(callback.data, "admin:provision:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
-    await callback.answer("در حال اجرای عملیات سفارش...")
+    await answer_callback(callback, "در حال اجرای عملیات سفارش...")
     await _run_order_fulfillment(
         callback=callback,
         bot=bot,
@@ -1015,10 +968,10 @@ async def reissue_order_credentials(
 
     order_id = _parse_callback_uuid(callback.data, "admin:reissue:")
     if order_id is None:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
-    await callback.answer("در حال صدور رمز جدید...")
+    await answer_callback(callback, "در حال صدور رمز جدید...")
     await _run_provisioning(
         callback=callback,
         bot=bot,

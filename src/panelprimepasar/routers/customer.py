@@ -36,6 +36,7 @@ from panelprimepasar.services.payments import (
     PaymentStateError,
     create_pending_payment,
 )
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="customer")
 
@@ -138,7 +139,7 @@ async def catalog_handler(message: Message, session: AsyncSession) -> None:
 
 @router.callback_query(F.data == "catalog")
 async def catalog_callback(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
     await send_catalog(callback.message, session)
@@ -146,7 +147,7 @@ async def catalog_callback(callback: CallbackQuery, session: AsyncSession) -> No
 
 @router.callback_query(F.data.startswith("plan:"))
 async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
 
@@ -176,16 +177,10 @@ async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
 @router.callback_query(F.data.startswith("checkout:"))
 async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> None:
     if not isinstance(callback.message, Message):
-        try:
-            await callback.answer()
-        except TelegramAPIError:
-            pass
+        await answer_callback(callback)
         return
 
-    try:
-        await callback.answer("در حال ثبت سفارش...")
-    except TelegramAPIError:
-        pass
+    await answer_callback(callback, "در حال ثبت سفارش...")
 
     data = callback.data or ""
     try:
@@ -212,7 +207,7 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
         message_id=callback.message.message_id,
         plan_id=plan.id,
     )
-    order, created = await get_or_create_checkout_order(
+    order, _ = await get_or_create_checkout_order(
         session,
         customer=customer,
         plan=plan,
@@ -224,8 +219,7 @@ async def checkout_handler(callback: CallbackQuery, session: AsyncSession) -> No
         payment_text = escape(instructions)
     else:
         payment_text = (
-            "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است؛ "
-            "قبل از پرداخت با مدیریت هماهنگ کنید."
+            "اطلاعات پرداخت هنوز توسط مدیریت تنظیم نشده است؛ قبل از پرداخت با مدیریت هماهنگ کنید."
         )
 
     payment_methods = await list_enabled_payment_methods(session)
@@ -248,14 +242,14 @@ async def manual_card_receipt_start(
     raw = callback.data or ""
     parts = raw.removeprefix("rm:").split(":", maxsplit=1)
     if len(parts) != 2:
-        await callback.answer("اطلاعات پرداخت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "اطلاعات پرداخت معتبر نیست.", show_alert=True)
         return
 
     slug, order_hex = parts
     try:
         order_id = UUID(hex=order_hex)
     except ValueError:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     order_customer = await _customer_order(
@@ -264,11 +258,12 @@ async def manual_card_receipt_start(
         order_id=order_id,
     )
     if order_customer is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
     _, order = order_customer
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
-        await callback.answer(
+        await answer_callback(
+            callback,
             f"وضعیت سفارش: {order_status_label(order.status)}",
             show_alert=True,
         )
@@ -280,7 +275,7 @@ async def manual_card_receipt_start(
         enabled_only=True,
     )
     if method is None or method.kind != PaymentMethodKind.MANUAL_CARD.value:
-        await callback.answer("روش کارت‌به‌کارت فعال نیست.", show_alert=True)
+        await answer_callback(callback, "روش کارت‌به‌کارت فعال نیست.", show_alert=True)
         return
 
     await state.clear()
@@ -289,11 +284,9 @@ async def manual_card_receipt_start(
         payment_method_id=str(method.id),
     )
     await state.set_state(ReceiptForm.waiting_receipt)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
-        await callback.message.answer(
-            f"رسید پرداخت «{escape(method.display_name)}» را ارسال کنید."
-        )
+        await callback.message.answer(f"رسید پرداخت «{escape(method.display_name)}» را ارسال کنید.")
 
 
 @router.callback_query(F.data.startswith("receipt:"))
@@ -306,7 +299,7 @@ async def receipt_start(
     try:
         order_id = UUID(data.removeprefix("receipt:"))
     except ValueError:
-        await callback.answer("شناسه سفارش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه سفارش معتبر نیست.", show_alert=True)
         return
 
     order_customer = await _customer_order(
@@ -315,12 +308,13 @@ async def receipt_start(
         order_id=order_id,
     )
     if order_customer is None:
-        await callback.answer("سفارش پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "سفارش پیدا نشد.", show_alert=True)
         return
 
     _, order = order_customer
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
-        await callback.answer(
+        await answer_callback(
+            callback,
             f"وضعیت سفارش: {order_status_label(order.status)}",
             show_alert=True,
         )
@@ -329,11 +323,9 @@ async def receipt_start(
     await state.clear()
     await state.update_data(order_id=str(order.id))
     await state.set_state(ReceiptForm.waiting_receipt)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
-        await callback.message.answer(
-            "تصویر رسید یا فایل رسید پرداخت را همین‌جا ارسال کنید."
-        )
+        await callback.message.answer("تصویر رسید یا فایل رسید پرداخت را همین‌جا ارسال کنید.")
 
 
 @router.message(ReceiptForm.waiting_receipt, F.photo | F.document)
@@ -352,9 +344,7 @@ async def receipt_received(
         order_id = UUID(str(data["order_id"]))
         payment_method_raw = data.get("payment_method_id")
         payment_method_id = (
-            UUID(str(payment_method_raw))
-            if payment_method_raw is not None
-            else None
+            UUID(str(payment_method_raw)) if payment_method_raw is not None else None
         )
     except (KeyError, ValueError):
         await state.clear()
@@ -374,9 +364,7 @@ async def receipt_received(
     customer, order = order_customer
     if order.status not in {OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT}:
         await state.clear()
-        await message.answer(
-            f"این سفارش اکنون «{order_status_label(order.status)}» است."
-        )
+        await message.answer(f"این سفارش اکنون «{order_status_label(order.status)}» است.")
         return
 
     if message.photo:
@@ -415,9 +403,7 @@ async def receipt_received(
             "payment_id": str(payment.id),
             "receipt_kind": receipt_kind,
             "payment_method_id": (
-                str(payment_method_id)
-                if payment_method_id is not None
-                else None
+                str(payment_method_id) if payment_method_id is not None else None
             ),
         },
     )
@@ -453,8 +439,7 @@ async def receipt_received(
             continue
 
     await message.answer(
-        "رسید ثبت شد و برای بررسی مدیریت ارسال شد. "
-        "پس از تأیید، وضعیت سفارش به‌روزرسانی می‌شود."
+        "رسید ثبت شد و برای بررسی مدیریت ارسال شد. پس از تأیید، وضعیت سفارش به‌روزرسانی می‌شود."
     )
 
 

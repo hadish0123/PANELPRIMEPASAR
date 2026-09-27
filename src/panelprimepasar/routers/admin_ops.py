@@ -45,6 +45,7 @@ from panelprimepasar.services.support import (
     get_ticket_messages,
     list_support_tickets,
 )
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 router = Router(name="admin_operations")
 
@@ -71,7 +72,7 @@ async def _allowed(
 
 
 async def _deny(callback: CallbackQuery) -> None:
-    await callback.answer("دسترسی ندارید.", show_alert=True)
+    await answer_callback(callback, "دسترسی ندارید.", show_alert=True)
 
 
 @router.callback_query(F.data == "admin:dashboard")
@@ -110,9 +111,7 @@ async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
     )
     pending_payments = int(
         await session.scalar(
-            select(func.count(Payment.id)).where(
-                Payment.status == PaymentStatus.PENDING
-            )
+            select(func.count(Payment.id)).where(Payment.status == PaymentStatus.PENDING)
         )
         or 0
     )
@@ -125,7 +124,7 @@ async def dashboard(callback: CallbackQuery, session: AsyncSession) -> None:
         or 0
     )
 
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             "<b>داشبورد</b>\n\n"
@@ -151,13 +150,11 @@ async def customers(callback: CallbackQuery, session: AsyncSession) -> None:
     rows = list(
         (
             await session.scalars(
-                select(Customer)
-                .order_by(Customer.created_at.desc(), Customer.id.desc())
-                .limit(20)
+                select(Customer).order_by(Customer.created_at.desc(), Customer.id.desc()).limit(20)
             )
         ).all()
     )
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
 
@@ -169,9 +166,7 @@ async def customers(callback: CallbackQuery, session: AsyncSession) -> None:
     for customer in rows:
         username = f"@{customer.telegram_username}" if customer.telegram_username else "-"
         state = "🚫" if customer.is_blocked else "✅"
-        lines.append(
-            f"{state} <code>{customer.telegram_user_id}</code> · {escape(username)}"
-        )
+        lines.append(f"{state} <code>{customer.telegram_user_id}</code> · {escape(username)}")
     await callback.message.answer(
         "<b>20 کاربر اخیر</b>\n\n" + "\n".join(lines),
         reply_markup=admin_menu(),
@@ -191,13 +186,11 @@ async def payments(callback: CallbackQuery, session: AsyncSession) -> None:
     rows = list(
         (
             await session.scalars(
-                select(Payment)
-                .order_by(Payment.created_at.desc(), Payment.id.desc())
-                .limit(20)
+                select(Payment).order_by(Payment.created_at.desc(), Payment.id.desc()).limit(20)
             )
         ).all()
     )
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
 
@@ -238,7 +231,7 @@ async def audit(callback: CallbackQuery, session: AsyncSession) -> None:
             )
         ).all()
     )
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
 
@@ -270,7 +263,7 @@ async def support(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     tickets = await list_support_tickets(session, limit=20)
-    await callback.answer()
+    await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
 
@@ -300,12 +293,12 @@ async def support_ticket_detail(
     try:
         ticket_id = UUID(hex=(callback.data or "").removeprefix("admin:ticket:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     ticket = await session.get(SupportTicket, ticket_id)
     if ticket is None:
-        await callback.answer("تیکت پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "تیکت پیدا نشد.", show_alert=True)
         return
 
     messages = await get_ticket_messages(session, ticket_id=ticket.id)
@@ -315,13 +308,9 @@ async def support_ticket_detail(
         sender = "👤" if item.sender_type == "customer" else "🛠"
         body_lines.append(f"{sender} {escape(item.body)}")
 
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
-        customer_text = (
-            str(customer.telegram_user_id)
-            if customer is not None
-            else "unknown"
-        )
+        customer_text = str(customer.telegram_user_id) if customer is not None else "unknown"
         await callback.message.answer(
             f"<b>{escape(ticket.subject)}</b>\n"
             f"شناسه: <code>{ticket.id}</code>\n"
@@ -347,22 +336,20 @@ async def support_reply_start(
         return
 
     try:
-        ticket_id = UUID(
-            hex=(callback.data or "").removeprefix("admin:ticket_reply:")
-        )
+        ticket_id = UUID(hex=(callback.data or "").removeprefix("admin:ticket_reply:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     ticket = await session.get(SupportTicket, ticket_id)
     if ticket is None or ticket.status == TicketStatus.CLOSED.value:
-        await callback.answer("این تیکت قابل پاسخ نیست.", show_alert=True)
+        await answer_callback(callback, "این تیکت قابل پاسخ نیست.", show_alert=True)
         return
 
     await state.clear()
     await state.update_data(ticket_id=str(ticket.id))
     await state.set_state(SupportReplyForm.body)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("پاسخ پشتیبانی را ارسال کنید.")
 
@@ -442,17 +429,15 @@ async def support_ticket_close(
         return
 
     try:
-        ticket_id = UUID(
-            hex=(callback.data or "").removeprefix("admin:ticket_close:")
-        )
+        ticket_id = UUID(hex=(callback.data or "").removeprefix("admin:ticket_close:"))
     except ValueError:
-        await callback.answer("شناسه تیکت معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه تیکت معتبر نیست.", show_alert=True)
         return
 
     try:
         ticket = await close_ticket_by_staff(session, ticket_id=ticket_id)
     except SupportStateError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
     await record_audit_event(
@@ -465,7 +450,7 @@ async def support_ticket_close(
         correlation_id=str(ticket.id),
     )
     await session.commit()
-    await callback.answer("تیکت بسته شد.")
+    await answer_callback(callback, "تیکت بسته شد.")
 
 
 @router.callback_query(F.data == "admin:staff")
@@ -479,7 +464,7 @@ async def staff_list(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     staff = await list_staff_admins(session)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             "مدیران ربات:",
@@ -502,7 +487,7 @@ async def staff_add_start(
         return
 
     await state.clear()
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer(
             "نقش مدیر جدید را انتخاب کنید:",
@@ -528,16 +513,16 @@ async def staff_role_selected(
     try:
         role = AdminRole(raw_role)
     except ValueError:
-        await callback.answer("نقش معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "نقش معتبر نیست.", show_alert=True)
         return
 
     if role == AdminRole.OWNER:
-        await callback.answer("Owner از env مدیریت می‌شود.", show_alert=True)
+        await answer_callback(callback, "Owner از env مدیریت می‌شود.", show_alert=True)
         return
 
     await state.update_data(staff_role=role.value)
     await state.set_state(StaffAddForm.telegram_id)
-    await callback.answer()
+    await answer_callback(callback)
     if isinstance(callback.message, Message):
         await callback.message.answer("Telegram ID مدیر جدید را ارسال کنید.")
 
@@ -609,16 +594,14 @@ async def staff_toggle(
         return
 
     try:
-        staff_id = UUID(
-            hex=(callback.data or "").removeprefix("admin:staff_toggle:")
-        )
+        staff_id = UUID(hex=(callback.data or "").removeprefix("admin:staff_toggle:"))
     except ValueError:
-        await callback.answer("شناسه مدیر معتبر نیست.", show_alert=True)
+        await answer_callback(callback, "شناسه مدیر معتبر نیست.", show_alert=True)
         return
 
     staff = await session.get(StaffAdmin, staff_id)
     if staff is None:
-        await callback.answer("مدیر پیدا نشد.", show_alert=True)
+        await answer_callback(callback, "مدیر پیدا نشد.", show_alert=True)
         return
 
     try:
@@ -628,7 +611,7 @@ async def staff_toggle(
             is_active=not staff.is_active,
         )
     except AdminAccessError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await answer_callback(callback, str(exc), show_alert=True)
         return
 
     await record_audit_event(
@@ -642,4 +625,4 @@ async def staff_toggle(
         metadata={"is_active": staff.is_active},
     )
     await session.commit()
-    await callback.answer("وضعیت مدیر تغییر کرد.")
+    await answer_callback(callback, "وضعیت مدیر تغییر کرد.")
