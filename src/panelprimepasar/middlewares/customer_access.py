@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from panelprimepasar.models import Customer
+from panelprimepasar.services.telegram_callbacks import answer_callback
 
 
 class CustomerAccessMiddleware(BaseMiddleware):
@@ -33,7 +34,8 @@ class CustomerAccessMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if isinstance(event, CallbackQuery):
-            await event.answer(
+            await answer_callback(
+                event,
                 "دسترسی این حساب توسط مدیریت مسدود شده است.",
                 show_alert=True,
             )
