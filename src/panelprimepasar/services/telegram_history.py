@@ -8,12 +8,12 @@ _MAX_RECENT_MESSAGES = 1_000
 
 
 async def clear_recent_private_history(bot: Bot, message: Message) -> None:
-    """Best-effort cleanup of deletable private-chat history, including /start."""
-    if message.chat.type != ChatType.PRIVATE or message.message_id < 1:
+    """Best-effort cleanup of private-chat history before the current /start."""
+    if message.chat.type != ChatType.PRIVATE or message.message_id <= 1:
         return
 
-    first_message_id = max(1, message.message_id - _MAX_RECENT_MESSAGES + 1)
-    message_ids = list(range(first_message_id, message.message_id + 1))
+    first_message_id = max(1, message.message_id - _MAX_RECENT_MESSAGES)
+    message_ids = list(range(first_message_id, message.message_id))
     for offset in range(0, len(message_ids), _DELETE_BATCH_SIZE):
         batch = message_ids[offset : offset + _DELETE_BATCH_SIZE]
         try:
