@@ -28,6 +28,7 @@ from panelprimepasar.security import Permission
 from panelprimepasar.services.admins import admin_has_permission
 from panelprimepasar.services.audit import record_audit_event
 from panelprimepasar.services.fulfillment import fulfill_paid_order
+from panelprimepasar.services.panel_urls import resolve_order_panel_url
 from panelprimepasar.services.pasarguard_instances import PasarGuardInstanceRouter
 from panelprimepasar.services.payments import (
     PaymentStateError,
@@ -118,15 +119,21 @@ def _order_details_text(order: Order, customer: Customer) -> str:
 async def _deliver_credentials(
     *,
     bot: Bot,
+    session: AsyncSession,
     settings: Settings,
     customer: Customer,
+    order_id: UUID,
     outcome: ProvisioningOutcome,
 ) -> bool:
     credentials = outcome.credentials
     if credentials is None:
         return False
 
-    panel_url = str(settings.pasarguard_base_url).rstrip("/")
+    panel_url = await resolve_order_panel_url(
+        session,
+        settings=settings,
+        order_id=order_id,
+    )
     text = (
         "<b>پنل نمایندگی شما آماده است.</b>\n\n"
         f"آدرس پنل: <code>{escape(panel_url)}</code>\n"
@@ -239,8 +246,10 @@ async def _run_provisioning(
 
     delivered = await _deliver_credentials(
         bot=bot,
+        session=session,
         settings=settings,
         customer=customer,
+        order_id=order_id,
         outcome=outcome,
     )
     await record_audit_event(
