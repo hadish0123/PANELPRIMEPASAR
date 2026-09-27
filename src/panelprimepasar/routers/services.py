@@ -1,7 +1,7 @@
 from html import escape
 from uuid import UUID
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -70,11 +70,16 @@ async def _send_subscription_list(
     session: AsyncSession,
     *,
     action: str | None = None,
+    telegram_user_id: int | None = None,
 ) -> None:
-    if message.from_user is None:
+    if telegram_user_id is None and message.from_user is None:
         return
 
-    customer = await _customer_for_user(session, message.from_user.id)
+    user_id = telegram_user_id
+    if user_id is None:
+        assert message.from_user is not None
+        user_id = message.from_user.id
+    customer = await _customer_for_user(session, user_id)
     if customer is None:
         await message.answer("ابتدا /start را ارسال کنید.")
         return
@@ -126,18 +131,19 @@ async def service_list_callback(
     await answer_callback(callback)
     if not isinstance(callback.message, Message):
         return
-    await _send_subscription_list(callback.message, session)
+    await _send_subscription_list(
+        callback.message,
+        session,
+        telegram_user_id=callback.from_user.id,
+    )
 
 
 @router.callback_query(F.data.startswith("svc:"))
 async def service_details(
     callback: CallbackQuery,
+    bot: Bot,
     session: AsyncSession,
 ) -> None:
-    if not isinstance(callback.message, Message):
-        await answer_callback(callback)
-        return
-
     try:
         subscription_id = UUID(hex=(callback.data or "").removeprefix("svc:"))
     except ValueError:
@@ -168,26 +174,31 @@ async def service_details(
     }.get(subscription.status, subscription.status)
 
     await answer_callback(callback)
-    await callback.message.answer(
-        f"<b>{plan_name}</b>\n"
-        f"شناسه سرویس: <code>{subscription.id}</code>\n"
-        f"وضعیت: <b>{status_label}</b>\n"
-        f"حجم ثبت‌شده: <b>{_format_quota(subscription.quota_bytes)}</b>",
+    await bot.send_message(
+        chat_id=callback.from_user.id,
+        text=(
+            f"<b>{plan_name}</b>\n"
+            f"شناسه سرویس: <code>{subscription.id}</code>\n"
+            f"وضعیت: <b>{status_label}</b>\n"
+            f"حجم ثبت‌شده: <b>{_format_quota(subscription.quota_bytes)}</b>"
+        ),
         reply_markup=subscription_actions_keyboard(subscription.id),
     )
 
 
 async def _start_lifecycle(
     callback: CallbackQuery,
+    bot: Bot,
     state: FSMContext,
     session: AsyncSession,
     *,
     subscription_id: UUID,
     kind: OrderKind,
 ) -> None:
+    await answer_callback(callback, "در حال آماده‌سازی...")
     customer = await _customer_for_user(session, callback.from_user.id)
     if customer is None:
-        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "حساب کاربری پیدا نشد.")
         return
 
     subscription = await get_customer_subscription(
@@ -196,12 +207,12 @@ async def _start_lifecycle(
         subscription_id=subscription_id,
     )
     if subscription is None:
-        await answer_callback(callback, "سرویس پیدا نشد.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "سرویس پیدا نشد.")
         return
 
     plans = await list_active_plans(session)
     if not plans:
-        await answer_callback(callback, "پلن فعالی برای فروش وجود ندارد.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "پلن فعالی برای فروش وجود ندارد.")
         return
 
     await state.clear()
@@ -210,18 +221,18 @@ async def _start_lifecycle(
         order_kind=kind.value,
     )
     await state.set_state(LifecycleForm.choosing_plan)
-    await answer_callback(callback)
-    if isinstance(callback.message, Message):
-        title = "پلن تمدید" if kind == OrderKind.RENEWAL else "بسته افزایش حجم"
-        await callback.message.answer(
-            f"{title} را انتخاب کنید:",
-            reply_markup=lifecycle_plans_keyboard(plans),
-        )
+    title = "پلن تمدید" if kind == OrderKind.RENEWAL else "بسته افزایش حجم"
+    await bot.send_message(
+        chat_id=callback.from_user.id,
+        text=f"{title} را انتخاب کنید:",
+        reply_markup=lifecycle_plans_keyboard(plans),
+    )
 
 
 @router.callback_query(F.data.startswith("svc_renew:"))
 async def renew_service_callback(
     callback: CallbackQuery,
+    bot: Bot,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
@@ -232,6 +243,7 @@ async def renew_service_callback(
         return
     await _start_lifecycle(
         callback,
+        bot,
         state,
         session,
         subscription_id=subscription_id,
@@ -242,6 +254,7 @@ async def renew_service_callback(
 @router.callback_query(F.data.startswith("svc_topup:"))
 async def topup_service_callback(
     callback: CallbackQuery,
+    bot: Bot,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
@@ -252,6 +265,7 @@ async def topup_service_callback(
         return
     await _start_lifecycle(
         callback,
+        bot,
         state,
         session,
         subscription_id=subscription_id,
@@ -262,6 +276,7 @@ async def topup_service_callback(
 @router.callback_query(F.data.startswith("svcact:"))
 async def service_action_picker(
     callback: CallbackQuery,
+    bot: Bot,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
@@ -284,6 +299,7 @@ async def service_action_picker(
 
     await _start_lifecycle(
         callback,
+        bot,
         state,
         session,
         subscription_id=subscription_id,
@@ -297,17 +313,16 @@ async def service_action_picker(
 )
 async def lifecycle_plan_selected(
     callback: CallbackQuery,
+    bot: Bot,
     state: FSMContext,
     session: AsyncSession,
 ) -> None:
-    if not isinstance(callback.message, Message):
-        await answer_callback(callback)
-        return
+    await answer_callback(callback, "در حال ثبت سفارش...")
 
     try:
         plan_id = UUID(hex=(callback.data or "").removeprefix("lifeplan:"))
     except ValueError:
-        await answer_callback(callback, "شناسه پلن معتبر نیست.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "شناسه پلن معتبر نیست.")
         return
 
     data = await state.get_data()
@@ -316,13 +331,13 @@ async def lifecycle_plan_selected(
         kind = OrderKind(str(data["order_kind"]))
     except (KeyError, ValueError):
         await state.clear()
-        await answer_callback(callback, "فرآیند منقضی شده است.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "فرآیند منقضی شده است.")
         return
 
     customer = await _customer_for_user(session, callback.from_user.id)
     if customer is None:
         await state.clear()
-        await answer_callback(callback, "حساب کاربری پیدا نشد.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "حساب کاربری پیدا نشد.")
         return
 
     subscription = await get_customer_subscription(
@@ -338,14 +353,17 @@ async def lifecycle_plan_selected(
     )
     if subscription is None or plan is None:
         await state.clear()
-        await answer_callback(callback, "سرویس یا پلن دیگر در دسترس نیست.", show_alert=True)
+        await bot.send_message(callback.from_user.id, "سرویس یا پلن دیگر در دسترس نیست.")
         return
 
-    idempotency_key = (
-        f"telegram:{callback.from_user.id}:message:{callback.message.message_id}:"
-        f"{kind.value}:{subscription.id}:{plan.id}"
+    source_message_id = (
+        callback.message.message_id if isinstance(callback.message, Message) else callback.id[:16]
     )
-    order, created = await create_lifecycle_order(
+    idempotency_key = (
+        f"telegram:{callback.from_user.id}:message:{source_message_id}:"
+        f"{kind.value}:{subscription.id.hex}:{plan.id.hex}"
+    )
+    order, _ = await create_lifecycle_order(
         session,
         customer=customer,
         subscription=subscription,
@@ -361,14 +379,16 @@ async def lifecycle_plan_selected(
     )
     action_text = "تمدید" if kind == OrderKind.RENEWAL else "افزایش حجم"
 
-    await answer_callback(callback, "سفارش ثبت شد." if created else "این سفارش قبلاً ثبت شده است.")
     payment_methods = await list_enabled_payment_methods(session)
-    await callback.message.answer(
-        f"سفارش {action_text} ثبت شد.\n"
-        f"شماره سفارش: <code>{order.id}</code>\n"
-        f"مبلغ: <b>{_format_money(order.price_amount, order.currency)}</b>\n\n"
-        f"{payment_text}\n\n"
-        "پس از پرداخت، رسید را ارسال کنید.",
+    await bot.send_message(
+        chat_id=callback.from_user.id,
+        text=(
+            f"سفارش {action_text} ثبت شد.\n"
+            f"شماره سفارش: <code>{order.id}</code>\n"
+            f"مبلغ: <b>{_format_money(order.price_amount, order.currency)}</b>\n\n"
+            f"{payment_text}\n\n"
+            "پس از پرداخت، رسید را ارسال کنید."
+        ),
         reply_markup=payment_receipt_keyboard(order.id, payment_methods),
     )
 

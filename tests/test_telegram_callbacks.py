@@ -76,13 +76,18 @@ async def test_plan_button_continues_after_expired_acknowledgement(
     )
     callback = _callback(answer)
     callback.data = f"plan:{plan_id}"
-    message = MagicMock(spec=Message)
-    message.edit_text = AsyncMock()
-    callback.message = message
+    callback.from_user = SimpleNamespace(id=12345)
+    callback.message = MagicMock(spec=Message)
+    bot = cast(Any, SimpleNamespace(send_message=AsyncMock()))
     get_active_plan = AsyncMock(return_value=plan)
     monkeypatch.setattr(customer_router, "get_active_plan", get_active_plan)
 
-    await customer_router.plan_details(callback, cast(Any, SimpleNamespace()))
+    await customer_router.plan_details(
+        callback,
+        bot,
+        cast(Any, SimpleNamespace()),
+    )
 
-    message.edit_text.assert_awaited_once()
-    assert "پلن تست" in message.edit_text.await_args.args[0]
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.await_args.kwargs["chat_id"] == 12345
+    assert "پلن تست" in bot.send_message.await_args.kwargs["text"]

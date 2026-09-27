@@ -37,6 +37,7 @@ from panelprimepasar.services.payments import (
     create_pending_payment,
 )
 from panelprimepasar.services.telegram_callbacks import answer_callback
+from panelprimepasar.services.telegram_history import clear_recent_private_history
 
 router = Router(name="customer")
 
@@ -123,10 +124,18 @@ async def _customer_order(
 
 
 @router.message(CommandStart())
-async def start_handler(message: Message, session: AsyncSession) -> None:
+async def start_handler(
+    message: Message,
+    bot: Bot,
+    state: FSMContext,
+    session: AsyncSession,
+) -> None:
+    await state.clear()
     await ensure_customer(message, session)
-    await message.answer(
-        "به سامانه فروش پنل پاسارگارد خوش آمدید.",
+    await clear_recent_private_history(bot, message)
+    await bot.send_message(
+        chat_id=message.chat.id,
+        text="به سامانه فروش پنل پاسارگارد خوش آمدید.",
         reply_markup=main_menu(),
     )
 
@@ -146,21 +155,23 @@ async def catalog_callback(callback: CallbackQuery, session: AsyncSession) -> No
 
 
 @router.callback_query(F.data.startswith("plan:"))
-async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
+async def plan_details(
+    callback: CallbackQuery,
+    bot: Bot,
+    session: AsyncSession,
+) -> None:
     await answer_callback(callback)
-    if not isinstance(callback.message, Message):
-        return
 
     data = callback.data or ""
     try:
         plan_id = UUID(data.removeprefix("plan:"))
     except ValueError:
-        await callback.message.answer("شناسه پلن معتبر نیست.")
+        await bot.send_message(callback.from_user.id, "شناسه پلن معتبر نیست.")
         return
 
     plan = await get_active_plan(session, plan_id)
     if plan is None:
-        await callback.message.answer("این پلن دیگر فعال نیست.")
+        await bot.send_message(callback.from_user.id, "این پلن دیگر فعال نیست.")
         return
 
     text = (
@@ -168,8 +179,9 @@ async def plan_details(callback: CallbackQuery, session: AsyncSession) -> None:
         f"حجم: <b>{format_quota(plan.quota_bytes)}</b>\n"
         f"قیمت: <b>{format_money(plan.price_amount, plan.currency)}</b>"
     )
-    await callback.message.edit_text(
-        text,
+    await bot.send_message(
+        chat_id=callback.from_user.id,
+        text=text,
         reply_markup=plan_actions_keyboard(plan.id),
     )
 

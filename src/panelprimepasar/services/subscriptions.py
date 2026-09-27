@@ -17,6 +17,7 @@ from panelprimepasar.models import (
     Subscription,
     SubscriptionStatus,
 )
+from panelprimepasar.services.quota import quota_bytes_to_pasarguard_data_limit
 
 
 class SubscriptionStateError(RuntimeError):
@@ -90,9 +91,7 @@ async def create_lifecycle_order(
     if kind not in {OrderKind.RENEWAL, OrderKind.TOPUP}:
         raise SubscriptionStateError("Lifecycle order kind must be renewal or topup")
 
-    existing = await session.scalar(
-        select(Order).where(Order.idempotency_key == idempotency_key)
-    )
+    existing = await session.scalar(select(Order).where(Order.idempotency_key == idempotency_key))
     if existing is not None:
         return existing, False
 
@@ -129,9 +128,7 @@ async def apply_paid_lifecycle_order(
     order_id: UUID,
     client: SubscriptionClient,
 ) -> SubscriptionActionOutcome:
-    order = await session.scalar(
-        select(Order).where(Order.id == order_id).with_for_update()
-    )
+    order = await session.scalar(select(Order).where(Order.id == order_id).with_for_update())
     if order is None:
         raise SubscriptionStateError("Order not found")
     if order.kind not in {OrderKind.RENEWAL, OrderKind.TOPUP}:
@@ -144,9 +141,7 @@ async def apply_paid_lifecycle_order(
             subscription_id=order.target_subscription_id,
         )
     if order.status not in {OrderStatus.PAID, OrderStatus.PROVISIONING, OrderStatus.FAILED}:
-        raise SubscriptionStateError(
-            f"Order status {order.status.value!r} cannot be applied"
-        )
+        raise SubscriptionStateError(f"Order status {order.status.value!r} cannot be applied")
 
     subscription = await session.scalar(
         select(Subscription)
@@ -175,7 +170,7 @@ async def apply_paid_lifecycle_order(
             )
             await client.modify_admin_by_id(
                 account.pasarguard_admin_id,
-                data_limit=new_quota,
+                data_limit=quota_bytes_to_pasarguard_data_limit(new_quota),
                 status="active",
                 note=f"PANELPRIMEPASAR topup order {order.id}",
             )
@@ -184,7 +179,7 @@ async def apply_paid_lifecycle_order(
         else:
             await client.modify_admin_by_id(
                 account.pasarguard_admin_id,
-                data_limit=order.quota_bytes,
+                data_limit=quota_bytes_to_pasarguard_data_limit(order.quota_bytes),
                 status="active",
                 note=f"PANELPRIMEPASAR renewal order {order.id}",
             )

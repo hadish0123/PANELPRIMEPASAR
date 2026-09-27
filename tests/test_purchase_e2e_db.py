@@ -18,6 +18,7 @@ from panelprimepasar.models import (
 )
 from panelprimepasar.services.payments import approve_manual_order
 from panelprimepasar.services.provisioning import ProvisioningService
+from panelprimepasar.services.quota import quota_bytes_to_pasarguard_data_limit
 from panelprimepasar.services.subscriptions import apply_paid_lifecycle_order
 
 
@@ -181,14 +182,10 @@ async def test_purchase_payment_to_reseller_provisioning_is_idempotent() -> None
         )
 
         account = await session.scalar(
-            select(PasarGuardAccount).where(
-                PasarGuardAccount.order_id == order.id
-            )
+            select(PasarGuardAccount).where(PasarGuardAccount.order_id == order.id)
         )
         subscription = await session.scalar(
-            select(Subscription).where(
-                Subscription.source_order_id == order.id
-            )
+            select(Subscription).where(Subscription.source_order_id == order.id)
         )
 
         assert first.success is True
@@ -197,8 +194,9 @@ async def test_purchase_payment_to_reseller_provisioning_is_idempotent() -> None
         assert second.already_provisioned is True
         assert repeated_payment.id == payment.id
         assert client.ensure_calls == 1
-        assert client.data_limits == [plan.quota_bytes]
-        assert client.sync_data_limits == [plan.quota_bytes]
+        expected_data_limit = quota_bytes_to_pasarguard_data_limit(plan.quota_bytes)
+        assert client.data_limits == [expected_data_limit]
+        assert client.sync_data_limits == [expected_data_limit]
         assert order.status == OrderStatus.COMPLETED
         assert account is not None
         assert account.quota_bytes == plan.quota_bytes
@@ -329,5 +327,7 @@ async def test_renewal_payment_to_lifecycle_fulfillment_is_idempotent() -> None:
         assert subscription.plan_id == renewal_plan.id
         assert subscription.expires_at is None
         assert subscription.quota_bytes == renewal_plan.quota_bytes
-        assert client.last_data_limit == renewal_plan.quota_bytes
+        assert client.last_data_limit == quota_bytes_to_pasarguard_data_limit(
+            renewal_plan.quota_bytes
+        )
         await session.rollback()

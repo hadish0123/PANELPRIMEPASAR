@@ -15,6 +15,7 @@ from panelprimepasar.models import (
     Subscription,
     SubscriptionStatus,
 )
+from panelprimepasar.services.quota import quota_bytes_to_pasarguard_data_limit
 from panelprimepasar.services.subscriptions import apply_paid_lifecycle_order
 
 
@@ -168,16 +169,16 @@ async def test_topup_increases_pasarguard_quota() -> None:
         assert refreshed_account is not None
         assert refreshed.quota_bytes == 750_000_000_000
         assert refreshed_account.quota_bytes == 750_000_000_000
-        assert client.calls[0]["data_limit"] == 750_000_000_000
+        assert client.calls[0]["data_limit"] == quota_bytes_to_pasarguard_data_limit(
+            750_000_000_000
+        )
         await session.rollback()
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_renewal_replaces_quota_and_removes_expiry() -> None:
     current_expiry = datetime.now(UTC) + timedelta(days=10)
-    customer, _, _, subscription = await _seed_subscription(
-        expires_at=current_expiry
-    )
+    customer, _, _, subscription = await _seed_subscription(expires_at=current_expiry)
     marker = uuid4().hex
 
     async with SessionFactory() as session:
@@ -220,7 +221,9 @@ async def test_renewal_replaces_quota_and_removes_expiry() -> None:
         assert refreshed is not None
         assert refreshed.expires_at is None
         assert refreshed.quota_bytes == 300_000_000_000
-        assert client.calls[0]["data_limit"] == 300_000_000_000
+        assert client.calls[0]["data_limit"] == quota_bytes_to_pasarguard_data_limit(
+            300_000_000_000
+        )
         assert refreshed.plan_id == renewal_plan.id
         assert refreshed.status == SubscriptionStatus.ACTIVE.value
         await session.rollback()

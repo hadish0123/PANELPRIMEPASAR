@@ -25,6 +25,7 @@ from panelprimepasar.models import (
     Subscription,
     SubscriptionStatus,
 )
+from panelprimepasar.services.quota import quota_bytes_to_pasarguard_data_limit
 
 
 class ProvisioningStateError(RuntimeError):
@@ -157,13 +158,8 @@ class ProvisioningService:
             PasarGuardAccount.order_id != order_id,
         )
         if self.pasarguard_instance_id is None:
-            return query.where(
-                PasarGuardAccount.pasarguard_instance_id.is_(None)
-            )
-        return query.where(
-            PasarGuardAccount.pasarguard_instance_id
-            == self.pasarguard_instance_id
-        )
+            return query.where(PasarGuardAccount.pasarguard_instance_id.is_(None))
+        return query.where(PasarGuardAccount.pasarguard_instance_id == self.pasarguard_instance_id)
 
     async def _repair_admin_id_collision(
         self,
@@ -177,9 +173,7 @@ class ProvisioningService:
             return False
 
         try:
-            remote_collision = await self.client.find_admin_by_username(
-                collision.username
-            )
+            remote_collision = await self.client.find_admin_by_username(collision.username)
         except PasarGuardError:
             return False
 
@@ -255,9 +249,7 @@ class ProvisioningService:
         *,
         order_id: UUID,
     ) -> ProvisioningOutcome:
-        order = await session.scalar(
-            select(Order).where(Order.id == order_id).with_for_update()
-        )
+        order = await session.scalar(select(Order).where(Order.id == order_id).with_for_update())
         if order is None:
             raise ProvisioningStateError("Order not found")
         if order.kind != OrderKind.NEW:
@@ -265,9 +257,7 @@ class ProvisioningService:
                 f"Order kind {order.kind.value!r} must use subscription lifecycle provisioning"
             )
 
-        customer = await session.scalar(
-            select(Customer).where(Customer.id == order.customer_id)
-        )
+        customer = await session.scalar(select(Customer).where(Customer.id == order.customer_id))
         account = await session.scalar(
             select(PasarGuardAccount).where(PasarGuardAccount.order_id == order.id)
         )
@@ -285,7 +275,7 @@ class ProvisioningService:
                 username=account.username,
                 password=password,
                 role_id=role.id,
-                data_limit=order.quota_bytes,
+                data_limit=quota_bytes_to_pasarguard_data_limit(order.quota_bytes),
                 note=f"PANELPRIMEPASAR order {order.id}",
             )
             if admin.id is None:
@@ -326,9 +316,7 @@ class ProvisioningService:
         *,
         order_id: UUID,
     ) -> ProvisioningOutcome:
-        order = await session.scalar(
-            select(Order).where(Order.id == order_id).with_for_update()
-        )
+        order = await session.scalar(select(Order).where(Order.id == order_id).with_for_update())
         if order is None:
             raise ProvisioningStateError("Order not found")
         if order.kind != OrderKind.NEW:
@@ -336,25 +324,20 @@ class ProvisioningService:
                 f"Order kind {order.kind.value!r} must use subscription lifecycle provisioning"
             )
 
-        customer = await session.scalar(
-            select(Customer).where(Customer.id == order.customer_id)
-        )
+        customer = await session.scalar(select(Customer).where(Customer.id == order.customer_id))
         if customer is None:
             raise ProvisioningStateError("Order customer not found")
 
         existing_account = await session.scalar(
             select(PasarGuardAccount).where(PasarGuardAccount.order_id == order.id)
         )
-        if (
-            existing_account is not None
-            and existing_account.pasarguard_admin_id is not None
-        ):
+        if existing_account is not None and existing_account.pasarguard_admin_id is not None:
             job = await self._get_job(session, order.id)
             job.attempts += 1
             try:
                 await self.client.modify_admin_by_id(
                     existing_account.pasarguard_admin_id,
-                    data_limit=order.quota_bytes,
+                    data_limit=quota_bytes_to_pasarguard_data_limit(order.quota_bytes),
                     status="active",
                     note=f"PANELPRIMEPASAR quota sync order {order.id}",
                 )
@@ -424,7 +407,7 @@ class ProvisioningService:
                 username=username,
                 password=password,
                 role_id=role.id,
-                data_limit=order.quota_bytes,
+                data_limit=quota_bytes_to_pasarguard_data_limit(order.quota_bytes),
                 note=f"PANELPRIMEPASAR order {order.id}",
             )
             if admin.id is None:
