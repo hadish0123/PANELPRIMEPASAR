@@ -10,6 +10,13 @@ from panelprimepasar.models import (
 )
 
 
+def _customer_dashboard_url(base_url: object) -> str:
+    normalized_url = str(base_url).rstrip("/")
+    if normalized_url.endswith("/dashboard"):
+        return normalized_url
+    return f"{normalized_url}/dashboard"
+
+
 async def resolve_order_panel_url(
     session: AsyncSession,
     *,
@@ -17,9 +24,7 @@ async def resolve_order_panel_url(
     order_id: UUID,
 ) -> str:
     account = await session.scalar(
-        select(PasarGuardAccount).where(
-            PasarGuardAccount.order_id == order_id
-        )
+        select(PasarGuardAccount).where(PasarGuardAccount.order_id == order_id)
     )
     if account is not None and account.pasarguard_instance_id is not None:
         instance = await session.get(
@@ -27,6 +32,6 @@ async def resolve_order_panel_url(
             account.pasarguard_instance_id,
         )
         if instance is not None:
-            return instance.base_url.rstrip("/")
+            return _customer_dashboard_url(instance.base_url)
 
-    return str(settings.pasarguard_base_url).rstrip("/")
+    return _customer_dashboard_url(settings.pasarguard_base_url)

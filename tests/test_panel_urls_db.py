@@ -12,7 +12,22 @@ from panelprimepasar.models import (
     PasarGuardInstance,
     Plan,
 )
-from panelprimepasar.services.panel_urls import resolve_order_panel_url
+from panelprimepasar.services.panel_urls import (
+    _customer_dashboard_url,
+    resolve_order_panel_url,
+)
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
+        ("https://node.example", "https://node.example/dashboard"),
+        ("https://node.example/", "https://node.example/dashboard"),
+        ("https://node.example/dashboard/", "https://node.example/dashboard"),
+    ],
+)
+def test_customer_dashboard_url(base_url: str, expected: str) -> None:
+    assert _customer_dashboard_url(base_url) == expected
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -76,13 +91,11 @@ async def test_panel_url_uses_assigned_pasarguard_instance() -> None:
 
         resolved = await resolve_order_panel_url(
             session,
-            settings=Settings(
-                pasarguard_base_url="https://global.example"
-            ),
+            settings=Settings(pasarguard_base_url="https://global.example"),
             order_id=order.id,
         )
 
-        assert resolved == f"https://assigned-{marker}.example"
+        assert resolved == f"https://assigned-{marker}.example/dashboard"
         await session.rollback()
 
 
@@ -138,11 +151,9 @@ async def test_panel_url_falls_back_to_global_for_legacy_account() -> None:
 
         resolved = await resolve_order_panel_url(
             session,
-            settings=Settings(
-                pasarguard_base_url="https://global.example/"
-            ),
+            settings=Settings(pasarguard_base_url="https://global.example/"),
             order_id=order.id,
         )
 
-        assert resolved == "https://global.example"
+        assert resolved == "https://global.example/dashboard"
         await session.rollback()
